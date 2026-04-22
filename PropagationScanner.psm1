@@ -24,23 +24,27 @@ function Test-OuterMotwPropagation {
     foreach ($exp in $Expected) {
         $path = Join-Path $DropDir $exp.FileName
         $row  = [ordered]@{
-            FileName   = $exp.FileName
-            Section    = 'outer'
-            Extractor  = $null
-            ExpectMotw = [bool]$exp.ExpectMotw
-            ActualMotw = $null
-            HostUrl    = $null
-            Status     = $null
-            Reason     = $null
+            FileName    = $exp.FileName
+            Section     = 'outer'
+            Extractor   = $null
+            ExpectMotw  = [bool]$exp.ExpectMotw
+            ActualMotw  = $null
+            ZoneName    = $null
+            HostUrl     = $null
+            ReferrerUrl = $null
+            Status      = $null
+            Reason      = $null
         }
         if (-not (Test-Path -LiteralPath $path)) {
             $row.Status = 'MISSING'
             $row.Reason = 'File not present in drop directory'
         } else {
             $motw = Get-FileMotw -Path $path
-            $row.ActualMotw = [bool]$motw
-            $row.HostUrl    = if ($motw) { $motw.HostUrl } else { $null }
-            $row.Status     = if ($row.ActualMotw -eq $row.ExpectMotw) { 'PASS' } else { 'FAIL' }
+            $row.ActualMotw  = [bool]$motw
+            $row.ZoneName    = if ($motw) { $motw.ZoneName }    else { $null }
+            $row.HostUrl     = if ($motw) { $motw.HostUrl }     else { $null }
+            $row.ReferrerUrl = if ($motw) { $motw.ReferrerUrl } else { $null }
+            $row.Status      = if ($row.ActualMotw -eq $row.ExpectMotw) { 'PASS' } else { 'FAIL' }
         }
         [pscustomobject]$row
     }
@@ -135,10 +139,16 @@ function Test-InnerMotwPropagation {
         } catch {
             foreach ($inner in $InnerSpec) {
                 [pscustomobject][ordered]@{
-                    FileName = "$containerName\$($inner.Path)"
-                    Section  = 'inner'; Extractor = $method
-                    ExpectMotw = [bool]$inner.ExpectMotw; ActualMotw = $null
-                    HostUrl = $null; Status = 'ERROR'; Reason = "Extractor failed: $_"
+                    FileName    = "$containerName\$($inner.Path)"
+                    Section     = 'inner'
+                    Extractor   = $method
+                    ExpectMotw  = [bool]$inner.ExpectMotw
+                    ActualMotw  = $null
+                    ZoneName    = $null
+                    HostUrl     = $null
+                    ReferrerUrl = $null
+                    Status      = 'ERROR'
+                    Reason      = "Extractor failed: $_"
                 }
             }
             continue
@@ -148,23 +158,27 @@ function Test-InnerMotwPropagation {
             foreach ($inner in $InnerSpec) {
                 $innerPath = Join-Path $handle.Path $inner.Path
                 $row = [ordered]@{
-                    FileName   = "$containerName\$($inner.Path)"
-                    Section    = 'inner'
-                    Extractor  = $method
-                    ExpectMotw = [bool]$inner.ExpectMotw
-                    ActualMotw = $null
-                    HostUrl    = $null
-                    Status     = $null
-                    Reason     = $inner.Reason
+                    FileName    = "$containerName\$($inner.Path)"
+                    Section     = 'inner'
+                    Extractor   = $method
+                    ExpectMotw  = [bool]$inner.ExpectMotw
+                    ActualMotw  = $null
+                    ZoneName    = $null
+                    HostUrl     = $null
+                    ReferrerUrl = $null
+                    Status      = $null
+                    Reason      = $inner.Reason
                 }
                 if (-not (Test-Path -LiteralPath $innerPath)) {
                     $row.Status = 'MISSING'
                     if (-not $row.Reason) { $row.Reason = 'Inner file not found after extraction' }
                 } else {
                     $motw = Get-FileMotw -Path $innerPath
-                    $row.ActualMotw = [bool]$motw
-                    $row.HostUrl    = if ($motw) { $motw.HostUrl } else { $null }
-                    $row.Status     = if ($row.ActualMotw -eq $row.ExpectMotw) { 'PASS' } else { 'FAIL' }
+                    $row.ActualMotw  = [bool]$motw
+                    $row.ZoneName    = if ($motw) { $motw.ZoneName }    else { $null }
+                    $row.HostUrl     = if ($motw) { $motw.HostUrl }     else { $null }
+                    $row.ReferrerUrl = if ($motw) { $motw.ReferrerUrl } else { $null }
+                    $row.Status      = if ($row.ActualMotw -eq $row.ExpectMotw) { 'PASS' } else { 'FAIL' }
                 }
                 [pscustomobject]$row
             }
@@ -205,9 +219,16 @@ function Invoke-MotwPropagationScan {
         $use = if ($Extractors -and $Extractors.Count -gt 0) { $Extractors } else { Get-AvailableExtractors $path }
         if (-not $use -or $use.Count -eq 0) {
             [pscustomobject][ordered]@{
-                FileName = $exp.FileName; Section = 'inner'; Extractor = $null
-                ExpectMotw = $null; ActualMotw = $null; HostUrl = $null
-                Status = 'SKIP'; Reason = 'No extractor available on this host for this container type'
+                FileName    = $exp.FileName
+                Section     = 'inner'
+                Extractor   = $null
+                ExpectMotw  = $null
+                ActualMotw  = $null
+                ZoneName    = $null
+                HostUrl     = $null
+                ReferrerUrl = $null
+                Status      = 'SKIP'
+                Reason      = 'No extractor available on this host for this container type'
             }
             continue
         }

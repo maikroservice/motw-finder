@@ -10,10 +10,12 @@ Every harness payload is a benign marker string with no executable behaviour.
 
 ## Requirements
 
-- **Detector, scanner, tampering generator:** Windows PowerShell 5.1 or
-  PowerShell 7+.
-- **Smuggling harness generator:** PowerShell 7+ (uses
-  `System.Security.Cryptography.AesGcm`, added in .NET 5).
+- **All tools (detector, scanner, tampering generator, git harness,
+  smuggling harness):** Windows PowerShell 5.1 or PowerShell 7+.
+  The smuggling harness defaults to AES-256-CBC + HMAC-SHA256
+  (Encrypt-then-MAC), which works on both editions.  Passing
+  `-CipherMode Gcm` switches to AES-GCM, which requires PowerShell 7+
+  (.NET 5+).
 - **Pester 5** for the test suites.
 - **Optional external tools, detected at runtime:**
   - `7z` / `7z.exe` / `7zz` — password-protected ZIP and 7z containers, 7z-based extraction
@@ -28,8 +30,8 @@ Every harness payload is a benign marker string with no executable behaviour.
 | `Find-Motw.ps1` | List every marked file under a path. |
 | `Find-SuspiciousMotw.ps1` | Rule-based hunt: dangerous-extension-from-Internet, suspicious host, unparseable stream, missing provenance. |
 | `PayloadBuilders.psm1` | Benign byte-builders for marker files, ZIP, OOXML, password ZIP, ISO. |
-| `SmugglingHarness.psm1` | AES-GCM encryption and Tier-1 manifest builder; produces the smuggling HTML. |
-| `smuggling-template.html` | Browser-side WebCrypto decrypt + `<a download>` drop loop. |
+| `SmugglingHarness.psm1` | AES-CBC+HMAC (default, PS 5.1-compatible) or AES-GCM (PS 7+) encryption; Tier-1 manifest builder; produces the smuggling HTML. |
+| `smuggling-template.html` | Browser-side WebCrypto decrypt + `<a download>` drop loop. Dual-mode: switches between CBC+HMAC and GCM at runtime based on the embedded mode marker. |
 | `New-SmugglingPayload.ps1` | CLI: emits `smuggle.html` + `expected.json` for later scanning. |
 | `PropagationScanner.psm1` | Compares observed MOTW to expected manifest; recurses into containers via each available extractor. |
 | `Test-MotwPropagation.ps1` | CLI over the scanner. Exits non-zero if any FAIL. |
@@ -57,6 +59,8 @@ Every `.psm1` has a sibling `.Tests.ps1`.
 
 ```powershell
 # 1. Generate the smuggling page + expected-MOTW manifest
+#    (default cipher is AES-CBC + HMAC-SHA256; add -CipherMode Gcm on PS 7+
+#     for AES-GCM realism)
 .\New-SmugglingPayload.ps1 -OutputDir C:\motw-test
 
 # 2. Open C:\motw-test\smuggle.html in each browser you want to exercise

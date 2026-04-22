@@ -66,7 +66,8 @@ function New-ZipContainerBytes {
         [Parameter(Mandatory)][hashtable[]]$Items,
         [string]$ArchiveName = 'container.zip'
     )
-    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression            -ErrorAction SilentlyContinue
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
     $ms = [System.IO.MemoryStream]::new()
     try {
         $zip = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Create, $true)

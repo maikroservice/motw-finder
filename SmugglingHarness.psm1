@@ -2,13 +2,24 @@ Set-StrictMode -Version Latest
 
 <#
 HTML-smuggling test harness.  Takes benign marker payloads from
-PayloadBuilders, encrypts each with AES-GCM, and inlines them into the
-smuggling-template.html.  Opening the emitted HTML in a browser triggers
-`<a download>` drops of every payload — the reproduction of canonical
-HTML-smuggling delivery against known-benign content so MOTW behaviour
-can be measured end-to-end.
+PayloadBuilders, encrypts each with an authenticated-encryption scheme,
+and inlines them into smuggling-template.html.  Opening the emitted
+HTML in a browser triggers `<a download>` drops of every payload — the
+reproduction of canonical HTML-smuggling delivery against known-benign
+content so MOTW behaviour can be measured end-to-end.
 
-Requires PowerShell 7+ (uses System.Security.Cryptography.AesGcm).
+Ciphers:
+  * CbcHmac  (default)  AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC.
+                        Works on Windows PowerShell 5.1 and PowerShell 7+.
+                        This is also a very common shape in real 2020-2023
+                        HTML-smuggling samples, so it makes for realistic
+                        detection test data.
+  * Gcm                 AES-256-GCM via System.Security.Cryptography.AesGcm.
+                        Requires PowerShell 7+ (.NET 5+).  More modern
+                        samples use this; kept as an option for realism.
+
+Both modes round-trip in PowerShell and via WebCrypto on the browser
+side.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +34,115 @@ function Test-AesGcmAvailable {
         return $true
     } catch { return $false }
 }
+
+# ---------- AES-CBC + HMAC-SHA256 (Encrypt-then-MAC) ----------
+
+function Invoke-AesCbcEncrypt {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][byte[]]$Key,
+        [Parameter(Mandatory)][byte[]]$InitVector,
+        [Parameter(Mandatory)][byte[]]$Plaintext
+    )
+    $aes = [System.Security.Cryptography.Aes]::Create()
+    try {
+        $aes.Mode    = [System.Security.Cryptography.CipherMode]::CBC
+        $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+        $aes.Key     = $Key
+        $aes.IV      = $InitVector
+        $enc = $aes.CreateEncryptor()
+        try {
+            return ,$enc.TransformFinalBlock($Plaintext, 0, $Plaintext.Length)
+        } finally { $enc.Dispose() }
+    } finally { $aes.Dispose() }
+}
+
+function Invoke-AesCbcDecrypt {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][byte[]]$Key,
+        [Parameter(Mandatory)][byte[]]$InitVector,
+        [Parameter(Mandatory)][byte[]]$Ciphertext
+    )
+    $aes = [System.Security.Cryptography.Aes]::Create()
+    try {
+        $aes.Mode    = [System.Security.Cryptography.CipherMode]::CBC
+        $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+        $aes.Key     = $Key
+        $aes.IV      = $InitVector
+        $dec = $aes.CreateDecryptor()
+        try {
+            return ,$dec.TransformFinalBlock($Ciphertext, 0, $Ciphertext.Length)
+        } finally { $dec.Dispose() }
+    } finally { $aes.Dispose() }
+}
+
+function Invoke-HmacSha256 {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][byte[]]$Key,
+        [Parameter(Mandatory)][byte[]]$Data
+    )
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new($Key)
+    try { return ,$hmac.ComputeHash($Data) }
+    finally { $hmac.Dispose() }
+}
+
+function Test-HmacConstantTime {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][byte[]]$A,
+        [Parameter(Mandatory)][byte[]]$B
+    )
+    if ($A.Length -ne $B.Length) { return $false }
+    $diff = 0
+    for ($i = 0; $i -lt $A.Length; $i++) {
+        $diff = $diff -bor ($A[$i] -bxor $B[$i])
+    }
+    return ($diff -eq 0)
+}
+
+function Invoke-AesCbcHmacEncrypt {
+    <#
+    .SYNOPSIS
+        Encrypt-then-MAC.  HMAC covers IV || ciphertext so the verifier
+        can confirm the IV hasn't been swapped either.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][byte[]]$AesKey,
+        [Parameter(Mandatory)][byte[]]$MacKey,
+        [Parameter(Mandatory)][byte[]]$InitVector,
+        [Parameter(Mandatory)][byte[]]$Plaintext
+    )
+    $ct = Invoke-AesCbcEncrypt -Key $AesKey -InitVector $InitVector -Plaintext $Plaintext
+    $macInput = [byte[]]::new($InitVector.Length + $ct.Length)
+    [Buffer]::BlockCopy($InitVector, 0, $macInput, 0, $InitVector.Length)
+    [Buffer]::BlockCopy($ct, 0, $macInput, $InitVector.Length, $ct.Length)
+    $tag = Invoke-HmacSha256 -Key $MacKey -Data $macInput
+    [pscustomobject]@{ Ciphertext = $ct; Tag = $tag }
+}
+
+function Invoke-AesCbcHmacDecrypt {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][byte[]]$AesKey,
+        [Parameter(Mandatory)][byte[]]$MacKey,
+        [Parameter(Mandatory)][byte[]]$InitVector,
+        [Parameter(Mandatory)][byte[]]$Ciphertext,
+        [Parameter(Mandatory)][byte[]]$Tag
+    )
+    $macInput = [byte[]]::new($InitVector.Length + $Ciphertext.Length)
+    [Buffer]::BlockCopy($InitVector, 0, $macInput, 0, $InitVector.Length)
+    [Buffer]::BlockCopy($Ciphertext, 0, $macInput, $InitVector.Length, $Ciphertext.Length)
+    $computed = Invoke-HmacSha256 -Key $MacKey -Data $macInput
+    if (-not (Test-HmacConstantTime -A $computed -B $Tag)) {
+        throw 'HMAC verification failed — ciphertext/IV was tampered or keys mismatch.'
+    }
+    Invoke-AesCbcDecrypt -Key $AesKey -InitVector $InitVector -Ciphertext $Ciphertext
+}
+
+# ---------- AES-GCM (optional, PS7+ only) ----------
 
 function Invoke-AesGcmEncrypt {
     [CmdletBinding()]
@@ -42,7 +162,7 @@ function Invoke-AesGcmEncrypt {
     $out = [byte[]]::new($ct.Length + $tag.Length)
     [Buffer]::BlockCopy($ct, 0, $out, 0, $ct.Length)
     [Buffer]::BlockCopy($tag, 0, $out, $ct.Length, $tag.Length)
-    return $out
+    return ,$out
 }
 
 function Invoke-AesGcmDecrypt {
@@ -64,15 +184,15 @@ function Invoke-AesGcmDecrypt {
     $plain = [byte[]]::new($ctLen)
     $gcm = [System.Security.Cryptography.AesGcm]::new($Key)
     try { $gcm.Decrypt($Nonce, $ct, $tag, $plain) } finally { $gcm.Dispose() }
-    return $plain
+    return ,$plain
 }
+
+# ---------- Default payload manifest ----------
 
 function Get-DefaultPayloadManifest {
     <#
     .SYNOPSIS
         The built-in payload set (Tier 1 + some Tier 3 script types).
-        Each entry knows its expected MOTW outcome on a fully-patched
-        current Windows so Test-MotwPropagation can pass/fail against it.
     #>
     [CmdletBinding()] param()
 
@@ -101,45 +221,46 @@ function Get-DefaultPayloadManifest {
 
     # B / C. Containers with an inner marker.lnk — exercises extractor propagation
     $innerLnk   = (New-MarkerFileBytes -Extension '.lnk' -Comment 'inner')
-    $innerItems = @(@{ Name = $innerLnk.FileName; Bytes = $innerLnk.Bytes })
+    $innerB64   = [Convert]::ToBase64String($innerLnk.Bytes)
+    $innerName  = $innerLnk.FileName
 
     $items += @{
         Builder = [scriptblock]::Create(@"
-New-ZipContainerBytes -Items @(@{ Name = '$($innerLnk.FileName)'; Bytes = [Convert]::FromBase64String('$([Convert]::ToBase64String($innerLnk.Bytes))') }) -ArchiveName 'container.zip'
+New-ZipContainerBytes -Items @(@{ Name = '$innerName'; Bytes = [Convert]::FromBase64String('$innerB64') }) -ArchiveName 'container.zip'
 "@)
         Mime       = 'application/zip'
         ExpectMotw = $true
-        Expected   = @{ InnerFiles = @(@{ Path = $innerLnk.FileName; ExpectMotw = $false; Reason = '7-Zip <22.00 / Explorer built-in vary on propagation; compare with fixed versions' }) }
+        Expected   = @{ InnerFiles = @(@{ Path = $innerName; ExpectMotw = $false; Reason = '7-Zip <22.00 / Explorer built-in vary on propagation' }) }
     }
 
     if (Test-ExternalTool @('7z','7z.exe','7zz')) {
         $items += @{
             Builder = [scriptblock]::Create(@"
-New-PasswordZipContainerBytes -Items @(@{ Name = '$($innerLnk.FileName)'; Bytes = [Convert]::FromBase64String('$([Convert]::ToBase64String($innerLnk.Bytes))') }) -Password 'motwtest' -ArchiveName 'container-pw.zip'
+New-PasswordZipContainerBytes -Items @(@{ Name = '$innerName'; Bytes = [Convert]::FromBase64String('$innerB64') }) -Password 'motwtest' -ArchiveName 'container-pw.zip'
 "@)
             Mime       = 'application/zip'
             ExpectMotw = $true
-            Expected   = @{ InnerFiles = @(@{ Path = $innerLnk.FileName; ExpectMotw = $false; Reason = 'Password-protected ZIPs historically strip MOTW on extraction' }) }
+            Expected   = @{ InnerFiles = @(@{ Path = $innerName; ExpectMotw = $false; Reason = 'Password-protected ZIPs historically strip MOTW on extraction' }) }
         }
     }
 
     if (Test-ExternalTool @('genisoimage','mkisofs','xorriso','oscdimg.exe','oscdimg')) {
         $items += @{
             Builder = [scriptblock]::Create(@"
-New-IsoContainerBytes -Items @(@{ Name = '$($innerLnk.FileName)'; Bytes = [Convert]::FromBase64String('$([Convert]::ToBase64String($innerLnk.Bytes))') }) -ArchiveName 'container.iso'
+New-IsoContainerBytes -Items @(@{ Name = '$innerName'; Bytes = [Convert]::FromBase64String('$innerB64') }) -ArchiveName 'container.iso'
 "@)
             Mime       = 'application/x-iso9660-image'
             ExpectMotw = $true
-            Expected   = @{ InnerFiles = @(@{ Path = $innerLnk.FileName; ExpectMotw = $true; Reason = 'Post-CVE-2022-41091 Windows should propagate MOTW on mount' }) }
+            Expected   = @{ InnerFiles = @(@{ Path = $innerName; ExpectMotw = $true; Reason = 'Post-CVE-2022-41091 Windows should propagate MOTW on mount' }) }
         }
 
         $items += @{
             Builder = [scriptblock]::Create(@"
-New-IsoContainerBytes -Items @(@{ Name = '$($innerLnk.FileName)'; Bytes = [Convert]::FromBase64String('$([Convert]::ToBase64String($innerLnk.Bytes))') }) -ArchiveName 'container.img'
+New-IsoContainerBytes -Items @(@{ Name = '$innerName'; Bytes = [Convert]::FromBase64String('$innerB64') }) -ArchiveName 'container.img'
 "@)
             Mime       = 'application/octet-stream'
             ExpectMotw = $true
-            Expected   = @{ InnerFiles = @(@{ Path = $innerLnk.FileName; ExpectMotw = $true; Reason = 'IMG handled same as ISO post-patch' }) }
+            Expected   = @{ InnerFiles = @(@{ Path = $innerName; ExpectMotw = $true; Reason = 'IMG handled same as ISO post-patch' }) }
         }
     }
 
@@ -158,44 +279,77 @@ New-IsoContainerBytes -Items @(@{ Name = '$($innerLnk.FileName)'; Bytes = [Conve
     $materialised
 }
 
+# ---------- Bundle assembler ----------
+
 function New-SmugglingHtmlBundle {
     <#
     .SYNOPSIS
         Build the smuggling HTML + expected-MOTW manifest from materialised items.
-    .PARAMETER Items
-        Objects with FileName, Bytes, Mime, ExpectMotw, Expected.
+    .PARAMETER CipherMode
+        CbcHmac (default, works on PS 5.1+) or Gcm (requires PS 7+).
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][object[]]$Items,
-        [string]$TemplatePath = $script:DefaultTemplate
+        [string]$TemplatePath = $script:DefaultTemplate,
+        [ValidateSet('CbcHmac','Gcm')][string]$CipherMode = 'CbcHmac'
     )
     if (-not (Test-Path -LiteralPath $TemplatePath)) {
         throw "Template not found: $TemplatePath"
     }
-
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    $key = [byte[]]::new(32); $rng.GetBytes($key)
-
-    $blobs = New-Object System.Collections.Generic.List[object]
-    foreach ($item in $Items) {
-        $iv = [byte[]]::new(12); $rng.GetBytes($iv)
-        $ct = Invoke-AesGcmEncrypt -Key $key -Nonce $iv -Plaintext $item.Bytes
-        $blobs.Add([pscustomobject]@{
-            n  = $item.FileName
-            m  = $item.Mime
-            iv = [Convert]::ToBase64String($iv)
-            c  = [Convert]::ToBase64String($ct)
-        })
+    if ($CipherMode -eq 'Gcm' -and -not (Test-AesGcmAvailable)) {
+        throw "CipherMode 'Gcm' requires PowerShell 7+ (.NET 5+). Use 'CbcHmac' for PS 5.1."
     }
 
-    $blobJson  = ConvertTo-Json -InputObject $blobs -Compress -Depth 4
-    $keyB64Lit = '"' + [Convert]::ToBase64String($key) + '"'
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $aesKey = [byte[]]::new(32); $rng.GetBytes($aesKey)
+        $macKey = $null
+        $ivLen  = 16
+        if ($CipherMode -eq 'CbcHmac') {
+            $macKey = [byte[]]::new(32); $rng.GetBytes($macKey)
+            $ivLen = 16
+        } else {
+            $ivLen = 12   # AES-GCM nonce
+        }
+
+        $blobs = New-Object System.Collections.Generic.List[object]
+        foreach ($item in $Items) {
+            $iv = [byte[]]::new($ivLen); $rng.GetBytes($iv)
+            if ($CipherMode -eq 'CbcHmac') {
+                $r = Invoke-AesCbcHmacEncrypt -AesKey $aesKey -MacKey $macKey -InitVector $iv -Plaintext $item.Bytes
+                $blobs.Add([pscustomobject]@{
+                    n  = $item.FileName
+                    m  = $item.Mime
+                    iv = [Convert]::ToBase64String($iv)
+                    c  = [Convert]::ToBase64String($r.Ciphertext)
+                    t  = [Convert]::ToBase64String($r.Tag)
+                })
+            } else {
+                $ct = Invoke-AesGcmEncrypt -Key $aesKey -Nonce $iv -Plaintext $item.Bytes
+                $blobs.Add([pscustomobject]@{
+                    n  = $item.FileName
+                    m  = $item.Mime
+                    iv = [Convert]::ToBase64String($iv)
+                    c  = [Convert]::ToBase64String($ct)
+                })
+            }
+        }
+    } finally {
+        $rng.Dispose()
+    }
+
+    $blobJson   = ConvertTo-Json -InputObject $blobs -Compress -Depth 4
+    $modeMarker = if ($CipherMode -eq 'CbcHmac') { "'cbc-hmac'" } else { "'gcm'" }
+    $aesKeyLit  = '"' + [Convert]::ToBase64String($aesKey) + '"'
+    $macKeyLit  = if ($null -ne $macKey) { '"' + [Convert]::ToBase64String($macKey) + '"' } else { 'null' }
 
     $html = Get-Content -LiteralPath $TemplatePath -Raw
-    $html = $html.Replace('{{COUNT}}', [string]$Items.Count)
-    $html = $html.Replace('/*__PAYLOAD_JSON__*/', $blobJson)
-    $html = $html.Replace('/*__KEY_B64__*/', $keyB64Lit)
+    $html = $html.Replace('{{COUNT}}',              [string]$Items.Count)
+    $html = $html.Replace('/*__CIPHER_MODE__*/',    $modeMarker)
+    $html = $html.Replace('/*__AES_KEY_B64__*/',    $aesKeyLit)
+    $html = $html.Replace('/*__MAC_KEY_B64__*/',    $macKeyLit)
+    $html = $html.Replace('/*__PAYLOAD_JSON__*/',   $blobJson)
 
     $expected = foreach ($item in $Items) {
         [pscustomobject]@{
@@ -208,14 +362,22 @@ function New-SmugglingHtmlBundle {
     }
 
     [pscustomobject]@{
-        Html     = $html
-        KeyB64   = [Convert]::ToBase64String($key)
-        Expected = @($expected)
+        Html       = $html
+        CipherMode = $CipherMode
+        AesKeyB64  = [Convert]::ToBase64String($aesKey)
+        MacKeyB64  = if ($null -ne $macKey) { [Convert]::ToBase64String($macKey) } else { $null }
+        Expected   = @($expected)
     }
 }
 
 Export-ModuleMember -Function `
     Test-AesGcmAvailable, `
+    Invoke-AesCbcEncrypt, `
+    Invoke-AesCbcDecrypt, `
+    Invoke-HmacSha256, `
+    Test-HmacConstantTime, `
+    Invoke-AesCbcHmacEncrypt, `
+    Invoke-AesCbcHmacDecrypt, `
     Invoke-AesGcmEncrypt, `
     Invoke-AesGcmDecrypt, `
     Get-DefaultPayloadManifest, `

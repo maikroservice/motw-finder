@@ -31,7 +31,8 @@ Describe 'New-ZipContainerBytes' {
         $p = New-ZipContainerBytes -Items $items -ArchiveName 'test.zip'
         $p.FileName | Should -Be 'test.zip'
 
-        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression            -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
         $ms = [System.IO.MemoryStream]::new($p.Bytes)
         $zip = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Read)
         try {
@@ -47,7 +48,8 @@ Describe 'New-OoxmlContainerBytes' {
         $p = New-OoxmlContainerBytes -Kind docx
         $p.FileName | Should -Be 'marker.docx'
 
-        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression            -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
         $ms = [System.IO.MemoryStream]::new($p.Bytes)
         $zip = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Read)
         try {
@@ -63,7 +65,8 @@ Describe 'New-OoxmlContainerBytes' {
         $p = New-OoxmlContainerBytes -Kind xlsm
         $p.FileName | Should -Be 'marker.xlsm'
 
-        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression            -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
         $ms = [System.IO.MemoryStream]::new($p.Bytes)
         $zip = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Read)
         try {

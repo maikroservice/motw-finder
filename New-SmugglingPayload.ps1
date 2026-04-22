@@ -1,18 +1,28 @@
-#Requires -Version 7.0
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Generate the HTML-smuggling test page + expected-MOTW manifest.
+
+.DESCRIPTION
+    Default cipher mode is CbcHmac (AES-256-CBC + HMAC-SHA256), which
+    works on Windows PowerShell 5.1 and PowerShell 7+.  Gcm mode requires
+    PS 7+ (.NET 5+) and is kept for realism with modern HTML-smuggling
+    samples.
 
 .EXAMPLE
     .\New-SmugglingPayload.ps1 -OutputDir C:\motw-test
     # -> C:\motw-test\smuggle.html  (open in each browser you want to test)
     # -> C:\motw-test\expected.json (consumed by Test-MotwPropagation.ps1)
+
+.EXAMPLE
+    .\New-SmugglingPayload.ps1 -OutputDir C:\motw-test -CipherMode Gcm
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)][string]$OutputDir,
     [string]$HtmlName     = 'smuggle.html',
-    [string]$ManifestName = 'expected.json'
+    [string]$ManifestName = 'expected.json',
+    [ValidateSet('CbcHmac','Gcm')][string]$CipherMode = 'CbcHmac'
 )
 
 Import-Module (Join-Path $PSScriptRoot 'SmugglingHarness.psm1') -Force
@@ -25,8 +35,8 @@ Write-Host "Building payloads..." -ForegroundColor Cyan
 $manifest = Get-DefaultPayloadManifest
 Write-Host "  $($manifest.Count) payload(s) built." -ForegroundColor Cyan
 
-Write-Host "Encrypting and assembling HTML..." -ForegroundColor Cyan
-$bundle = New-SmugglingHtmlBundle -Items $manifest
+Write-Host "Encrypting ($CipherMode) and assembling HTML..." -ForegroundColor Cyan
+$bundle = New-SmugglingHtmlBundle -Items $manifest -CipherMode $CipherMode
 
 $htmlPath = Join-Path $OutputDir $HtmlName
 $mfPath   = Join-Path $OutputDir $ManifestName

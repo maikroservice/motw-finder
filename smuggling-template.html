@@ -31,8 +31,10 @@ every payload contains a known marker string.</div>
 <div id="log"></div>
 
 <script>
-const BLOBS = /*__PAYLOAD_JSON__*/;
-const KEY_B64 = /*__KEY_B64__*/;
+const MODE        = /*__CIPHER_MODE__*/;
+const K_AES_B64   = /*__AES_KEY_B64__*/;
+const K_MAC_B64   = /*__MAC_KEY_B64__*/;
+const BLOBS       = /*__PAYLOAD_JSON__*/;
 const DROP_DELAY_MS = 250;
 
 function b64ToBytes(b64) {
@@ -42,15 +44,42 @@ function b64ToBytes(b64) {
   return a;
 }
 
-async function importKey() {
-  const raw = b64ToBytes(KEY_B64);
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt']);
+function concatBytes(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
 }
 
-async function dropOne(key, spec) {
+async function importKeys() {
+  const aesRaw = b64ToBytes(K_AES_B64);
+  const out = {};
+  if (MODE === 'cbc-hmac') {
+    out.aes = await crypto.subtle.importKey('raw', aesRaw, { name: 'AES-CBC' },             false, ['decrypt']);
+    out.mac = await crypto.subtle.importKey('raw', b64ToBytes(K_MAC_B64),
+                                            { name: 'HMAC', hash: 'SHA-256' },              false, ['verify']);
+  } else {  // 'gcm'
+    out.aes = await crypto.subtle.importKey('raw', aesRaw, { name: 'AES-GCM' },             false, ['decrypt']);
+  }
+  return out;
+}
+
+async function decryptOne(keys, spec) {
   const iv = b64ToBytes(spec.iv);
   const ct = b64ToBytes(spec.c);
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+
+  if (MODE === 'cbc-hmac') {
+    const tag = b64ToBytes(spec.t);
+    const ok = await crypto.subtle.verify({ name: 'HMAC' }, keys.mac, tag, concatBytes(iv, ct));
+    if (!ok) throw new Error('HMAC verification failed');
+    return await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, keys.aes, ct);
+  } else {
+    return await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, keys.aes, ct);
+  }
+}
+
+async function dropOne(keys, spec) {
+  const plain = await decryptOne(keys, spec);
   const blob = new Blob([plain], { type: spec.m });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -65,7 +94,7 @@ async function dropOne(key, spec) {
 document.getElementById('go').addEventListener('click', async (ev) => {
   ev.target.disabled = true;
   const log = document.getElementById('log');
-  const key = await importKey();
+  const keys = await importKeys();
   for (let i = 0; i < BLOBS.length; i++) {
     const spec = BLOBS[i];
     const row = document.createElement('div');
@@ -73,7 +102,7 @@ document.getElementById('go').addEventListener('click', async (ev) => {
     row.textContent = `[${i + 1}/${BLOBS.length}] ${spec.n} (${spec.m}) ...`;
     log.appendChild(row);
     try {
-      await dropOne(key, spec);
+      await dropOne(keys, spec);
       row.classList.replace('pending', 'ok');
       row.textContent = `[${i + 1}/${BLOBS.length}] ${spec.n} dropped`;
     } catch (e) {
@@ -82,7 +111,7 @@ document.getElementById('go').addEventListener('click', async (ev) => {
     }
     await new Promise(r => setTimeout(r, DROP_DELAY_MS));
   }
-  ev.target.textContent = 'Done — check your Downloads folder.';
+  ev.target.textContent = `Done (mode=${MODE}) — check your Downloads folder.`;
 });
 </script>
 </body>

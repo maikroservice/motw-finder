@@ -12,8 +12,8 @@ Describe 'AES-CBC primitive round-trip' {
         $rng.Dispose()
         $plain = [System.Text.Encoding]::UTF8.GetBytes('MOTW-TEST-PAYLOAD-7b3d hello world')
 
-        $ct  = Invoke-AesCbcEncrypt -Key $key -Iv $iv -Plaintext $plain
-        $out = Invoke-AesCbcDecrypt -Key $key -Iv $iv -Ciphertext $ct
+        $ct  = Invoke-AesCbcEncrypt -Key $key -InitVector $iv -Plaintext $plain
+        $out = Invoke-AesCbcDecrypt -Key $key -InitVector $iv -Ciphertext $ct
 
         [System.Text.Encoding]::UTF8.GetString($out) | Should -Be ([System.Text.Encoding]::UTF8.GetString($plain))
     }
@@ -30,34 +30,34 @@ Describe 'Invoke-AesCbcHmacEncrypt / Decrypt (Encrypt-then-MAC)' {
     }
 
     It 'round-trips a plaintext via encrypt/decrypt' {
-        $r   = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -Iv $script:iv -Plaintext $script:plain
-        $out = Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $script:macKey -Iv $script:iv -Ciphertext $r.Ciphertext -Tag $r.Tag
+        $r   = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -InitVector $script:iv -Plaintext $script:plain
+        $out = Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $script:macKey -InitVector $script:iv -Ciphertext $r.Ciphertext -Tag $r.Tag
         [System.Text.Encoding]::UTF8.GetString($out) | Should -Be ([System.Text.Encoding]::UTF8.GetString($script:plain))
     }
 
     It 'rejects a tampered ciphertext' {
-        $r = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -Iv $script:iv -Plaintext $script:plain
+        $r = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -InitVector $script:iv -Plaintext $script:plain
         $bad = [byte[]]::new($r.Ciphertext.Length)
         [Buffer]::BlockCopy($r.Ciphertext, 0, $bad, 0, $r.Ciphertext.Length)
         $bad[0] = [byte](($bad[0] -bxor 0xFF))
-        { Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $script:macKey -Iv $script:iv -Ciphertext $bad -Tag $r.Tag } |
+        { Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $script:macKey -InitVector $script:iv -Ciphertext $bad -Tag $r.Tag } |
             Should -Throw
     }
 
     It 'rejects a tampered IV' {
-        $r = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -Iv $script:iv -Plaintext $script:plain
+        $r = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -InitVector $script:iv -Plaintext $script:plain
         $badIv = [byte[]]::new($script:iv.Length)
         [Buffer]::BlockCopy($script:iv, 0, $badIv, 0, $script:iv.Length)
         $badIv[0] = [byte](($badIv[0] -bxor 0xFF))
-        { Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $script:macKey -Iv $badIv -Ciphertext $r.Ciphertext -Tag $r.Tag } |
+        { Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $script:macKey -InitVector $badIv -Ciphertext $r.Ciphertext -Tag $r.Tag } |
             Should -Throw
     }
 
     It 'rejects a wrong MAC key' {
-        $r = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -Iv $script:iv -Plaintext $script:plain
+        $r = Invoke-AesCbcHmacEncrypt -AesKey $script:aesKey -MacKey $script:macKey -InitVector $script:iv -Plaintext $script:plain
         $otherMac = [byte[]]::new(32)
         [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($otherMac)
-        { Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $otherMac -Iv $script:iv -Ciphertext $r.Ciphertext -Tag $r.Tag } |
+        { Invoke-AesCbcHmacDecrypt -AesKey $script:aesKey -MacKey $otherMac -InitVector $script:iv -Ciphertext $r.Ciphertext -Tag $r.Tag } |
             Should -Throw
     }
 }
@@ -144,7 +144,7 @@ Describe 'New-SmugglingHtmlBundle (default CbcHmac)' {
             $iv  = [Convert]::FromBase64String($blobs[$i].iv)
             $ct  = [Convert]::FromBase64String($blobs[$i].c)
             $tag = [Convert]::FromBase64String($blobs[$i].t)
-            $plain = Invoke-AesCbcHmacDecrypt -AesKey $aesKey -MacKey $macKey -Iv $iv -Ciphertext $ct -Tag $tag
+            $plain = Invoke-AesCbcHmacDecrypt -AesKey $aesKey -MacKey $macKey -InitVector $iv -Ciphertext $ct -Tag $tag
             $plain.Length        | Should -Be $script:items[$i].Bytes.Length
             (,$plain -join ',')  | Should -Be ((,$script:items[$i].Bytes) -join ',')
         }

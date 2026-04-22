@@ -41,7 +41,7 @@ function Invoke-AesCbcEncrypt {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][byte[]]$Key,
-        [Parameter(Mandatory)][byte[]]$Iv,
+        [Parameter(Mandatory)][byte[]]$InitVector,
         [Parameter(Mandatory)][byte[]]$Plaintext
     )
     $aes = [System.Security.Cryptography.Aes]::Create()
@@ -49,7 +49,7 @@ function Invoke-AesCbcEncrypt {
         $aes.Mode    = [System.Security.Cryptography.CipherMode]::CBC
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
         $aes.Key     = $Key
-        $aes.IV      = $Iv
+        $aes.IV      = $InitVector
         $enc = $aes.CreateEncryptor()
         try {
             return ,$enc.TransformFinalBlock($Plaintext, 0, $Plaintext.Length)
@@ -61,7 +61,7 @@ function Invoke-AesCbcDecrypt {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][byte[]]$Key,
-        [Parameter(Mandatory)][byte[]]$Iv,
+        [Parameter(Mandatory)][byte[]]$InitVector,
         [Parameter(Mandatory)][byte[]]$Ciphertext
     )
     $aes = [System.Security.Cryptography.Aes]::Create()
@@ -69,7 +69,7 @@ function Invoke-AesCbcDecrypt {
         $aes.Mode    = [System.Security.Cryptography.CipherMode]::CBC
         $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
         $aes.Key     = $Key
-        $aes.IV      = $Iv
+        $aes.IV      = $InitVector
         $dec = $aes.CreateDecryptor()
         try {
             return ,$dec.TransformFinalBlock($Ciphertext, 0, $Ciphertext.Length)
@@ -112,13 +112,13 @@ function Invoke-AesCbcHmacEncrypt {
     param(
         [Parameter(Mandatory)][byte[]]$AesKey,
         [Parameter(Mandatory)][byte[]]$MacKey,
-        [Parameter(Mandatory)][byte[]]$Iv,
+        [Parameter(Mandatory)][byte[]]$InitVector,
         [Parameter(Mandatory)][byte[]]$Plaintext
     )
-    $ct = Invoke-AesCbcEncrypt -Key $AesKey -Iv $Iv -Plaintext $Plaintext
-    $macInput = [byte[]]::new($Iv.Length + $ct.Length)
-    [Buffer]::BlockCopy($Iv, 0, $macInput, 0, $Iv.Length)
-    [Buffer]::BlockCopy($ct, 0, $macInput, $Iv.Length, $ct.Length)
+    $ct = Invoke-AesCbcEncrypt -Key $AesKey -InitVector $InitVector -Plaintext $Plaintext
+    $macInput = [byte[]]::new($InitVector.Length + $ct.Length)
+    [Buffer]::BlockCopy($InitVector, 0, $macInput, 0, $InitVector.Length)
+    [Buffer]::BlockCopy($ct, 0, $macInput, $InitVector.Length, $ct.Length)
     $tag = Invoke-HmacSha256 -Key $MacKey -Data $macInput
     [pscustomobject]@{ Ciphertext = $ct; Tag = $tag }
 }
@@ -128,18 +128,18 @@ function Invoke-AesCbcHmacDecrypt {
     param(
         [Parameter(Mandatory)][byte[]]$AesKey,
         [Parameter(Mandatory)][byte[]]$MacKey,
-        [Parameter(Mandatory)][byte[]]$Iv,
+        [Parameter(Mandatory)][byte[]]$InitVector,
         [Parameter(Mandatory)][byte[]]$Ciphertext,
         [Parameter(Mandatory)][byte[]]$Tag
     )
-    $macInput = [byte[]]::new($Iv.Length + $Ciphertext.Length)
-    [Buffer]::BlockCopy($Iv, 0, $macInput, 0, $Iv.Length)
-    [Buffer]::BlockCopy($Ciphertext, 0, $macInput, $Iv.Length, $Ciphertext.Length)
+    $macInput = [byte[]]::new($InitVector.Length + $Ciphertext.Length)
+    [Buffer]::BlockCopy($InitVector, 0, $macInput, 0, $InitVector.Length)
+    [Buffer]::BlockCopy($Ciphertext, 0, $macInput, $InitVector.Length, $Ciphertext.Length)
     $computed = Invoke-HmacSha256 -Key $MacKey -Data $macInput
     if (-not (Test-HmacConstantTime -A $computed -B $Tag)) {
         throw 'HMAC verification failed — ciphertext/IV was tampered or keys mismatch.'
     }
-    Invoke-AesCbcDecrypt -Key $AesKey -Iv $Iv -Ciphertext $Ciphertext
+    Invoke-AesCbcDecrypt -Key $AesKey -InitVector $InitVector -Ciphertext $Ciphertext
 }
 
 # ---------- AES-GCM (optional, PS7+ only) ----------
@@ -317,7 +317,7 @@ function New-SmugglingHtmlBundle {
         foreach ($item in $Items) {
             $iv = [byte[]]::new($ivLen); $rng.GetBytes($iv)
             if ($CipherMode -eq 'CbcHmac') {
-                $r = Invoke-AesCbcHmacEncrypt -AesKey $aesKey -MacKey $macKey -Iv $iv -Plaintext $item.Bytes
+                $r = Invoke-AesCbcHmacEncrypt -AesKey $aesKey -MacKey $macKey -InitVector $iv -Plaintext $item.Bytes
                 $blobs.Add([pscustomobject]@{
                     n  = $item.FileName
                     m  = $item.Mime

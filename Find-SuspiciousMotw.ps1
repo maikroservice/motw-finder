@@ -5,10 +5,10 @@
 
 .DESCRIPTION
     Wraps Find-SuspiciousMotw and groups findings by severity. Rules include:
-      - DangerousExtensionFromInternet  (High)   — ZoneId=3 + .lnk/.hta/.wsf/.chm/.js/...
-      - SuspiciousOrigin                (Medium) — HostUrl/ReferrerUrl matches known-abused infra
-      - UnparseableZoneIdentifier       (Medium) — stream exists but won't parse (tampering)
-      - MissingProvenance               (Info)   — Internet zone with empty HostUrl/ReferrerUrl
+      - DangerousExtensionFromInternet  (High)   -- ZoneId=3 + .lnk/.hta/.wsf/.chm/.js/...
+      - SuspiciousOrigin                (Medium) -- HostUrl/ReferrerUrl matches known-abused infra
+      - UnparseableZoneIdentifier       (Medium) -- stream exists but won't parse (tampering)
+      - MissingProvenance               (Info)   -- Internet zone with empty HostUrl/ReferrerUrl
 
 .EXAMPLE
     .\Find-SuspiciousMotw.ps1 -Path C:\Users\$env:USERNAME\Downloads

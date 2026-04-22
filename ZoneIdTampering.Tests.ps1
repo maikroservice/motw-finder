@@ -44,7 +44,7 @@ Describe 'New-TamperedZoneIdentifierBytes' {
     }
 }
 
-Describe 'Parser response matrix (variant × ConvertFrom-ZoneIdentifier)' {
+Describe 'Parser response matrix (variant x ConvertFrom-ZoneIdentifier)' {
     $cases = @(
         @{ Variant = 'Empty';              Expect = 'throw' }
         @{ Variant = 'WhitespaceOnly';     Expect = 'throw' }

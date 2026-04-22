@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 HTML-smuggling test harness.  Takes benign marker payloads from
 PayloadBuilders, encrypts each with an authenticated-encryption scheme,
 and inlines them into smuggling-template.html.  Opening the emitted
-HTML in a browser triggers `<a download>` drops of every payload — the
+HTML in a browser triggers `<a download>` drops of every payload -- the
 reproduction of canonical HTML-smuggling delivery against known-benign
 content so MOTW behaviour can be measured end-to-end.
 
@@ -137,7 +137,7 @@ function Invoke-AesCbcHmacDecrypt {
     [Buffer]::BlockCopy($Ciphertext, 0, $macInput, $InitVector.Length, $Ciphertext.Length)
     $computed = Invoke-HmacSha256 -Key $MacKey -Data $macInput
     if (-not (Test-HmacConstantTime -A $computed -B $Tag)) {
-        throw 'HMAC verification failed — ciphertext/IV was tampered or keys mismatch.'
+        throw 'HMAC verification failed -- ciphertext/IV was tampered or keys mismatch.'
     }
     Invoke-AesCbcDecrypt -Key $AesKey -InitVector $InitVector -Ciphertext $Ciphertext
 }
@@ -219,7 +219,7 @@ function Get-DefaultPayloadManifest {
         }
     }
 
-    # B / C. Containers with an inner marker.lnk — exercises extractor propagation
+    # B / C. Containers with an inner marker.lnk -- exercises extractor propagation
     $innerLnk   = (New-MarkerFileBytes -Extension '.lnk' -Comment 'inner')
     $innerB64   = [Convert]::ToBase64String($innerLnk.Bytes)
     $innerName  = $innerLnk.FileName

@@ -39,25 +39,25 @@ $script:Variants = @(
     },
     @{
         Name        = 'ZoneIdZero'
-        Description = 'ZoneId=0 (Local) on a file that was obviously downloaded — "downgrade".'
+        Description = 'ZoneId=0 (Local) on a file that was obviously downloaded -- "downgrade".'
         Builder     = { ,[System.Text.Encoding]::ASCII.GetBytes("[ZoneTransfer]`r`nZoneId=0`r`nHostUrl=https://cdn.discordapp.com/x`r`n") }
         ParseExpectation = 'parse'
     },
     @{
         Name        = 'NonIntegerZoneId'
-        Description = 'ZoneId=abc — malformed integer value (CVE-2022-44698 family).'
+        Description = 'ZoneId=abc -- malformed integer value (CVE-2022-44698 family).'
         Builder     = { ,[System.Text.Encoding]::ASCII.GetBytes("[ZoneTransfer]`r`nZoneId=abc`r`n") }
         ParseExpectation = 'throw'
     },
     @{
         Name        = 'NegativeZoneId'
-        Description = 'ZoneId=-1 — negative; undefined behaviour per spec.'
+        Description = 'ZoneId=-1 -- negative; undefined behaviour per spec.'
         Builder     = { ,[System.Text.Encoding]::ASCII.GetBytes("[ZoneTransfer]`r`nZoneId=-1`r`n") }
         ParseExpectation = 'parse'
     },
     @{
         Name        = 'PaddedCve202244698'
-        Description = 'Zone.Identifier padded with nulls after a valid ZoneTransfer — shape used by Magniber (CVE-2022-44698) to confuse SmartScreen.'
+        Description = 'Zone.Identifier padded with nulls after a valid ZoneTransfer -- shape used by Magniber (CVE-2022-44698) to confuse SmartScreen.'
         Builder     = {
             $head = [System.Text.Encoding]::ASCII.GetBytes("[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=https://example/`r`n")
             $pad  = [byte[]]::new(1024)
@@ -107,11 +107,11 @@ AppZoneId=3
             [Buffer]::BlockCopy($body, 0, $out, $bom.Length, $body.Length)
             ,$out
         }
-        ParseExpectation = 'parse'   # BOM lives in the leading '[' line — our parser tolerates via Trim
+        ParseExpectation = 'parse'   # BOM lives in the leading '[' line -- our parser tolerates via Trim
     },
     @{
         Name        = 'HugeHostUrl'
-        Description = 'HostUrl of 8KB — exercises any size-based heuristics.'
+        Description = 'HostUrl of 8KB -- exercises any size-based heuristics.'
         Builder     = {
             $url  = 'https://' + ('a' * 8000) + '.example/'
             ,[System.Text.Encoding]::ASCII.GetBytes("[ZoneTransfer]`r`nZoneId=3`r`nHostUrl=$url`r`n")

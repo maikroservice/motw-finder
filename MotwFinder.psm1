@@ -153,7 +153,7 @@ function Test-SuspiciousMotwUrl {
         }
 
         if ($hostName -eq 'cdn.discordapp.com' -or $hostName -eq 'media.discordapp.net') {
-            return "Discord CDN ($hostName) — commonly abused for malware delivery"
+            return "Discord CDN ($hostName) -- commonly abused for malware delivery"
         }
         if ($hostName -eq 'raw.githubusercontent.com' -or $hostName -eq 'gist.githubusercontent.com') {
             return "Raw GitHub content ($hostName)"
@@ -162,7 +162,7 @@ function Test-SuspiciousMotwUrl {
             return "File-share direct-download host ($hostName)"
         }
         if ($script:UrlShorteners -contains $hostName) {
-            return "URL shortener ($hostName) — obfuscated origin"
+            return "URL shortener ($hostName) -- obfuscated origin"
         }
 
         return $null

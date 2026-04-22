@@ -2,11 +2,11 @@ Set-StrictMode -Version Latest
 
 <#
 Compares MOTW propagation across two delivery paths for identical bytes:
-  * `git clone` — never applies MOTW (files arrive via the git object
+  * `git clone` -- never applies MOTW (files arrive via the git object
     protocol, never through the browser's download pipeline).  This is
     the evergreen bypass; every file in the working tree reads as
     "local origin" to SmartScreen / Office Protected View.
-  * Browser "Download ZIP" (e.g. GitHub archive) — does get MOTW on
+  * Browser "Download ZIP" (e.g. GitHub archive) -- does get MOTW on
     the outer archive.  Inner propagation depends on the extractor,
     same matrix as the smuggling harness.
 

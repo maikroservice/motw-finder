@@ -61,7 +61,7 @@ Describe 'Invoke-GitCloneAndScan' -Skip:(-not $script:gitAvailable) {
 
     It 'detects the MOTW-bypass invariant: zero MOTW across the tree even when Get-FileMotw is mocked to Windows-like results that simulate tagging' {
         # Force the scanner to "see" MOTW on everything. The clone path should still
-        # produce HasMotw=true rows — this test documents *our harness* behavior, not
+        # produce HasMotw=true rows -- this test documents *our harness* behavior, not
         # git's: the harness faithfully surfaces whatever Get-FileMotw reports. The
         # actual MOTW-bypass measurement depends on running on NTFS.
         Mock -ModuleName GitHarness Get-FileMotw {

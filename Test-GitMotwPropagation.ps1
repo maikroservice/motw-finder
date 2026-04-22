@@ -5,7 +5,7 @@
     browser-downloaded ZIP of the same tree.
 
 .DESCRIPTION
-    The clone path should produce zero Zone.Identifier streams — that's
+    The clone path should produce zero Zone.Identifier streams -- that's
     the evergreen bypass.  The download-archive path should produce MOTW
     on the outer ZIP; inner propagation depends on the extractor.
 

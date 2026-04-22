@@ -53,7 +53,7 @@ function Get-AvailableExtractors {
     $list = [System.Collections.Generic.List[string]]::new()
 
     if ($ext -eq '.zip') {
-        $list.Add('Expand-Archive')      # never propagates — useful baseline
+        $list.Add('Expand-Archive')      # never propagates -- useful baseline
         if (Test-ExternalTool @('7z','7z.exe','7zz')) { $list.Add('7z') }
     }
     if ($ext -in @('.iso', '.img')) {

@@ -18,7 +18,7 @@ function New-MarkerFileBytes {
     <#
     .SYNOPSIS
         Emit a plain marker file with the given extension. Not a real
-        executable/script — just a text marker the runner can recognise.
+        executable/script -- just a text marker the runner can recognise.
     #>
     [CmdletBinding()]
     param(
@@ -38,7 +38,7 @@ function New-MarkerHtaBytes {
     <#
     .SYNOPSIS
         Minimal .hta that, if mshta opens it, just sets window.title.
-        Still benign — no shell execution, no ActiveX.
+        Still benign -- no shell execution, no ActiveX.
     #>
     [CmdletBinding()] param()
     $html = @"
@@ -194,7 +194,7 @@ function New-PasswordZipContainerBytes {
     )
     $sevenZip = Test-ExternalTool -Candidates @('7z','7z.exe','7zz')
     if (-not $sevenZip) {
-        throw '7z CLI not found on PATH — install 7-Zip to build password-protected archives.'
+        throw '7z CLI not found on PATH -- install 7-Zip to build password-protected archives.'
     }
 
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ("pwzip_" + [guid]::NewGuid().ToString('N'))
@@ -233,7 +233,7 @@ function New-IsoContainerBytes {
     )
     $tool = Test-ExternalTool -Candidates @('genisoimage','mkisofs','xorriso','oscdimg.exe','oscdimg')
     if (-not $tool) {
-        throw 'No ISO mastering tool found — install genisoimage/mkisofs/xorriso (Linux) or the Windows ADK (oscdimg.exe).'
+        throw 'No ISO mastering tool found -- install genisoimage/mkisofs/xorriso (Linux) or the Windows ADK (oscdimg.exe).'
     }
 
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ("iso_" + [guid]::NewGuid().ToString('N'))

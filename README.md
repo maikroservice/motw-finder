@@ -33,8 +33,10 @@ Every harness payload is a benign marker string with no executable behaviour.
 | `SmugglingHarness.psm1` | AES-CBC+HMAC (default, PS 5.1-compatible) or AES-GCM (PS 7+) encryption; Tier-1 manifest builder; produces the smuggling HTML. |
 | `smuggling-template.html` | Browser-side WebCrypto decrypt + `<a download>` drop loop. Dual-mode: switches between CBC+HMAC and GCM at runtime based on the embedded mode marker. |
 | `New-SmugglingPayload.ps1` | CLI: emits `smuggle.html` + `expected.json` for later scanning. |
+| `Start-SmugglingServer.ps1` | Minimal local HTTP server (`System.Net.HttpListener`) for serving the smuggling page so browsers treat drops as Internet zone instead of Untrusted. |
 | `PropagationScanner.psm1` | Compares observed MOTW to expected manifest; recurses into containers via each available extractor. |
-| `Test-MotwPropagation.ps1` | CLI over the scanner. Exits non-zero if any FAIL. |
+| `Test-MotwPropagation.ps1` | CLI over the scanner. PASS = bypass succeeded (no MOTW), FAIL = bypass failed (MOTW present). |
+| `Debug-MotwScan.ps1` | Per-file diagnostic: prints the raw `Zone.Identifier` bytes, parser output, and candidate renames. Use when the scanner result looks wrong. |
 | `ZoneIdTampering.psm1` | 13 malformed-stream variants (CVE-2022-44698 padding, ZoneId downgrade, BOMs, missing header, etc.). |
 | `New-TamperedFixtures.ps1` | CLI: produces a directory of files each carrying a different tampered stream. |
 | `GitHarness.psm1` | Fixture-repo builder + clone-vs-download-archive MOTW comparison. |
@@ -58,25 +60,75 @@ Every `.psm1` has a sibling `.Tests.ps1`.
 ## Quick start — HTML-smuggling harness
 
 ```powershell
-# 1. Generate the smuggling page + expected-MOTW manifest
-#    (default cipher is AES-CBC + HMAC-SHA256; add -CipherMode Gcm on PS 7+
-#     for AES-GCM realism)
+# 1. Generate the smuggling page + expected-MOTW manifest.
+#    Default cipher is AES-CBC + HMAC-SHA256. Add -CipherMode Gcm on PS 7+
+#    to emit AES-GCM instead (more realistic for modern samples).
 .\New-SmugglingPayload.ps1 -OutputDir C:\motw-test
 
-# 2. Open C:\motw-test\smuggle.html in each browser you want to exercise
-#    (Chrome, Edge, Firefox, etc.) and click "Drop N payloads".
+# 2. Serve the page over http://localhost so drops land as Internet zone
+#    (ZoneId=3). Opening smuggle.html via file:// works too, but drops
+#    then land as Untrusted zone (ZoneId=4) with HostUrl=file:///, which
+#    is not what real phishing delivery looks like.
+.\Start-SmugglingServer.ps1 -Root C:\motw-test        # defaults to port 8080
+# keep this window open; Ctrl+C to stop
+
+# 3. In a browser, open http://localhost:8080/smuggle.html and click the
+#    "Drop" button next to each payload. Every payload has its own button
+#    so every click is a user gesture -- that avoids Chrome/Edge/Firefox
+#    throttling automatic multi-downloads. For risky extensions
+#    (.lnk, .ps1, .bat, .vbs, .hta, .js, ...) the browser still prompts
+#    "Keep / Discard" in its downloads panel; click "Keep" on each.
 #    Every payload carries the marker string "MOTW-TEST-PAYLOAD-7b3d".
 
-# 3. Scan the drop folder against the expected manifest
+# 4. Scan the drop folder against the expected manifest.
 .\Test-MotwPropagation.ps1 `
     -DropDir "$env:USERPROFILE\Downloads" `
     -ExpectedManifest C:\motw-test\expected.json
 ```
 
-Output is a PASS/FAIL table per (file, section, extractor). The scanner
-recurses into every container that has `Expected.InnerFiles` in the
-manifest, using whichever extractors are on PATH — `Expand-Archive`,
-`7z`, and `Mount-DiskImage` for ISO/IMG.
+Output is a summary with PASS/FAIL counts and an inline legend:
+
+- **PASS** = no Zone.Identifier on disk (MOTW bypass succeeded).
+- **FAIL** = Zone.Identifier present (MOTW applied; bypass failed).
+- **MISSING** = file not at the expected path (browser blocked it, or
+  collided on a name and got renamed to `marker (1).txt`).
+
+The scanner recurses into every container that has `Expected.InnerFiles`
+in the manifest, using whichever extractors are on PATH —
+`Expand-Archive`, `7z`, and `Mount-DiskImage` for ISO/IMG.
+
+### Why the local HTTP server matters
+
+Browsers compute the outer `HostUrl` field of the `Zone.Identifier` from
+the page's origin:
+
+| How you opened `smuggle.html`   | `HostUrl` baked into MOTW      | Zone        |
+|---------------------------------|---------------------------------|-------------|
+| `file:///C:/motw-test/...`      | `file:///`                      | Untrusted (4) |
+| `http://localhost:8080/...`     | `http://localhost:8080/`        | Internet (3)  |
+| Real public URL                 | That URL                        | Internet (3)  |
+
+For measuring actual bypass shapes against SmartScreen / Office Protected
+View, you want Internet zone. The `Untrusted` zone can trigger additional
+gates that wouldn't fire on a real phish and will confuse your results.
+`Start-SmugglingServer.ps1` is a ~70-line `HttpListener` so you don't
+need IIS, Python, or Node just for this.
+
+### Browser bypass tips
+
+- **Risky extensions blocked.** Chrome, Edge, and Firefox refuse to
+  auto-download `.lnk`, `.ps1`, `.bat`, `.cmd`, `.vbs`, `.js`, `.wsf`,
+  `.hta`, `.chm`, `.scr`, etc. The file is staged in the downloads panel
+  with a **Keep / Discard** choice — click Keep on each to land it on
+  disk. If you don't, those rows show MISSING in the scanner output.
+- **Container delivery instead.** The realistic attacker shape is to
+  deliver a `.zip` or `.iso` containing the risky inner file; browsers
+  don't block containers, and propagation through the extractor is
+  exactly what the scanner's inner-container matrix measures.
+- **Diagnostic.** If the scanner result looks wrong, run
+  `Debug-MotwScan.ps1 -DropDir ... -ExpectedManifest ...` — it prints
+  the raw `Zone.Identifier` bytes per file, and lists any
+  collision-renamed candidates in the drop dir.
 
 ## Quick start — Zone.Identifier tampering
 
@@ -118,19 +170,25 @@ real NTFS ADS or an external tool is guarded with `-Skip`.
 
 ### HTML-smuggling harness
 The browser writes every payload from a `Blob`. Modern Chrome/Edge/Firefox
-tag these with `Zone.Identifier`, so **outer** MOTW should land on every
-drop. The interesting results are:
+tag these with `Zone.Identifier`, so **outer** drops should land with
+MOTW (Status = `FAIL` in the bypass-perspective summary — the defense
+worked). The interesting results are in the **inner** section, where
+each extractor is a potential bypass:
 
-- **ISO / IMG with inner `.lnk`** — on a fully-patched Windows post-
-  CVE-2022-41091, mounting should propagate MOTW. If the scanner reports
-  FAIL on the inner `.lnk` with `Mount-DiskImage`, your machine is behind
-  on the Nov 2022 patch.
-- **ZIP via `Expand-Archive`** — never propagates. This is the baseline
-  "bypass shape".
-- **ZIP via 7z** — propagation depends on version. 7-Zip 22.00+ (June
-  2022) propagates; older versions don't.
+- **ISO / IMG with inner `.lnk` via `Mount-DiskImage`** — on a fully-
+  patched Windows post-CVE-2022-41091, mounting propagates MOTW, so
+  inner rows should be `FAIL` (bypass failed). If you instead see `PASS`
+  (no MOTW on the inner file), your machine is behind on the Nov 2022
+  patch and is vulnerable to the Qakbot/BazarLoader ISO pattern.
+- **ZIP via `Expand-Archive`** — never propagates. Inner rows will
+  always be `PASS` (bypass succeeded); this is the baseline bypass shape
+  that any PowerShell-based extraction gives attackers for free.
+- **ZIP via `7z`** — depends on version. 7-Zip 22.00+ (June 2022)
+  propagates (`FAIL`, bypass failed); older 7-Zip versions don't
+  (`PASS`, bypass succeeded). Useful for confirming whether the user
+  fleet has been updated.
 - **Password-protected ZIP** — historically strips MOTW across most
-  extractors regardless of version.
+  extractors regardless of version. Expect `PASS` on the inner file.
 
 ### Zone.Identifier tampering
 Each variant probes either the parser or SmartScreen itself. Variants
@@ -172,7 +230,9 @@ worth investigating.
 Every payload the harness can generate is a benign marker: plain text,
 minimal HTA with a `document.title` set, or an OOXML document whose
 body contains `MOTW-TEST-PAYLOAD-7b3d`. No payload calls into the shell,
-drops follow-on files, or persists. The AES-GCM encryption in the HTML
-template reproduces the *shape* of real HTML smuggling for detection
-work; it isn't obfuscating malicious content. Use this tooling on
-systems you own or are authorised to test.
+drops follow-on files, or persists. The AES-CBC+HMAC (or AES-GCM)
+encryption in the HTML template reproduces the *shape* of real HTML
+smuggling for detection work; it isn't obfuscating malicious content.
+The local HTTP server only binds `http://localhost:<port>` and never
+makes outbound connections. Use this tooling on systems you own or are
+authorised to test.

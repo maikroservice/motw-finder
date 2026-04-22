@@ -1,7 +1,7 @@
 #Requires -Modules @{ ModuleName='Pester'; ModuleVersion='5.0.0' }
 
 BeforeAll {
-    Import-Module (Join-Path $PSScriptRoot 'PropagationScanner.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../psm/PropagationScanner.psm1') -Force
 }
 
 # Status semantics:

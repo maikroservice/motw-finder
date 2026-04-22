@@ -18,7 +18,7 @@ param(
     [string[]]$Variants
 )
 
-Import-Module (Join-Path $PSScriptRoot 'ZoneIdTampering.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'psm/ZoneIdTampering.psm1') -Force
 
 if (-not (Test-Path -LiteralPath $OutputDir)) {
     New-Item -Path $OutputDir -ItemType Directory | Out-Null

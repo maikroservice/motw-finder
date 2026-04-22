@@ -1,7 +1,7 @@
 #Requires -Modules @{ ModuleName='Pester'; ModuleVersion='5.0.0' }
 
 BeforeAll {
-    $modulePath = Join-Path $PSScriptRoot 'MotwFinder.psm1'
+    $modulePath = Join-Path $PSScriptRoot '../psm/MotwFinder.psm1'
     Import-Module $modulePath -Force
 }
 

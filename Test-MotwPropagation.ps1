@@ -45,7 +45,7 @@ param(
     [ValidateSet('Table','Csv','Json')][string]$Format = 'Table'
 )
 
-Import-Module (Join-Path $PSScriptRoot 'MotwFinder.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'psm/MotwFinder.psm1') -Force
 
 $Path = (Resolve-Path -LiteralPath $Path).ProviderPath
 if (-not (Test-Path -LiteralPath $Path -PathType Container)) {

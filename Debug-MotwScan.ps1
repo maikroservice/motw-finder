@@ -19,7 +19,7 @@ param(
     [Parameter(Mandatory, Position = 1)][string]$ExpectedManifest
 )
 
-Import-Module (Join-Path $PSScriptRoot 'MotwFinder.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'psm/MotwFinder.psm1') -Force
 
 if (-not (Test-Path -LiteralPath $ExpectedManifest)) {
     throw "Expected manifest not found: $ExpectedManifest"

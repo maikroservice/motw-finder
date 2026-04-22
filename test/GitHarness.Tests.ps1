@@ -1,7 +1,7 @@
 #Requires -Modules @{ ModuleName='Pester'; ModuleVersion='5.0.0' }
 
 BeforeAll {
-    Import-Module (Join-Path $PSScriptRoot 'GitHarness.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../psm/GitHarness.psm1') -Force
     $script:gitAvailable = [bool](Get-Command git -ErrorAction SilentlyContinue)
 }
 

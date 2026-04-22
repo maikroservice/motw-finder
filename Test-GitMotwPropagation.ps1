@@ -30,7 +30,7 @@ param(
     [ValidateSet('Table','Grouped','Csv','Json')][string]$Format = 'Grouped'
 )
 
-Import-Module (Join-Path $PSScriptRoot 'GitHarness.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'psm/GitHarness.psm1') -Force
 
 if (-not (Test-Path -LiteralPath $WorkDir)) {
     New-Item -Path $WorkDir -ItemType Directory | Out-Null

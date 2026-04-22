@@ -25,7 +25,7 @@ param(
     [ValidateSet('High', 'Medium', 'Info')][string]$MinSeverity = 'Info'
 )
 
-Import-Module (Join-Path $PSScriptRoot 'MotwFinder.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'psm/MotwFinder.psm1') -Force
 
 $params = @{ Path = $Path }
 if ($PSBoundParameters.ContainsKey('Since')) { $params.Since = $Since }

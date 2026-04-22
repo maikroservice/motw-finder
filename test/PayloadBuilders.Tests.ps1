@@ -1,7 +1,7 @@
 #Requires -Modules @{ ModuleName='Pester'; ModuleVersion='5.0.0' }
 
 BeforeAll {
-    Import-Module (Join-Path $PSScriptRoot 'PayloadBuilders.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../psm/PayloadBuilders.psm1') -Force
 }
 
 Describe 'Marker builders' {

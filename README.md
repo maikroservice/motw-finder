@@ -22,27 +22,44 @@ Every harness payload is a benign marker string with no executable behaviour.
   - `genisoimage` / `mkisofs` / `xorriso` (Linux) or `oscdimg.exe` (Windows ADK) — ISO/IMG generation
   - `git` — git-clone comparison harness
 
+## Repository layout
+
+```
+motw-finder/
+|-- *.ps1                 # runnable scripts (Find-Motw, New-SmugglingPayload, ...)
+|-- psm/                  # module files (*.psm1) + smuggling-template.html asset
+|-- test/                 # Pester test suites (*.Tests.ps1)
+`-- README.md, .gitignore
+```
+
 ## Module map
 
-| File | Role |
+**Runnable scripts (repo root)**
+
+| Script | Role |
 |---|---|
-| `MotwFinder.psm1` | Core detector: read `Zone.Identifier`, parse it, classify suspicious patterns. |
 | `Find-Motw.ps1` | List every marked file under a path. |
 | `Find-SuspiciousMotw.ps1` | Rule-based hunt: dangerous-extension-from-Internet, suspicious host, unparseable stream, missing provenance. |
-| `PayloadBuilders.psm1` | Benign byte-builders for marker files, ZIP, OOXML, password ZIP, ISO. |
-| `SmugglingHarness.psm1` | AES-CBC+HMAC (default, PS 5.1-compatible) or AES-GCM (PS 7+) encryption; Tier-1 manifest builder; produces the smuggling HTML. |
-| `smuggling-template.html` | Browser-side WebCrypto decrypt + `<a download>` drop loop. Dual-mode: switches between CBC+HMAC and GCM at runtime based on the embedded mode marker. |
 | `New-SmugglingPayload.ps1` | CLI: emits `smuggle.html` + `expected.json` for later scanning. |
 | `Start-SmugglingServer.ps1` | Minimal local HTTP server (`System.Net.HttpListener`) for serving the smuggling page so browsers treat drops as Internet zone instead of Untrusted. |
 | `Test-MotwPropagation.ps1` | Walk a directory and print `HasMotw = True/False` per file. Includes a banner explaining how detection works. |
-| `PropagationScanner.psm1` | Library-only utilities used by `GitHarness.psm1`: `Get-AvailableExtractors`, `Expand-ContainerToTemp`, `Dismount-ContainerHandle`. Not called by the CLI any more. |
 | `Debug-MotwScan.ps1` | Per-file diagnostic: prints the raw `Zone.Identifier` bytes, parser output, and candidate renames. Use when the scanner result looks wrong. |
-| `ZoneIdTampering.psm1` | 13 malformed-stream variants (CVE-2022-44698 padding, ZoneId downgrade, BOMs, missing header, etc.). |
 | `New-TamperedFixtures.ps1` | CLI: produces a directory of files each carrying a different tampered stream. |
-| `GitHarness.psm1` | Fixture-repo builder + clone-vs-download-archive MOTW comparison. |
 | `Test-GitMotwPropagation.ps1` | CLI, supports `-BuildFixtureRepo` for offline use. |
 
-Every `.psm1` has a sibling `.Tests.ps1`.
+**Modules (`psm/`)**
+
+| File | Role |
+|---|---|
+| `psm/MotwFinder.psm1` | Core detector: read `Zone.Identifier`, parse it, classify suspicious patterns. |
+| `psm/PayloadBuilders.psm1` | Benign byte-builders for marker files, ZIP, OOXML, password ZIP, ISO. |
+| `psm/SmugglingHarness.psm1` | AES-CBC+HMAC (default, PS 5.1-compatible) or AES-GCM (PS 7+) encryption; Tier-1 manifest builder; produces the smuggling HTML. |
+| `psm/smuggling-template.html` | Browser-side WebCrypto decrypt + `<a download>` drop loop. Dual-mode: switches between CBC+HMAC and GCM at runtime based on the embedded mode marker. |
+| `psm/PropagationScanner.psm1` | Library-only utilities used by `psm/GitHarness.psm1`: `Get-AvailableExtractors`, `Expand-ContainerToTemp`, `Dismount-ContainerHandle`. Not called by the CLI any more. |
+| `psm/ZoneIdTampering.psm1` | 13 malformed-stream variants (CVE-2022-44698 padding, ZoneId downgrade, BOMs, missing header, etc.). |
+| `psm/GitHarness.psm1` | Fixture-repo builder + clone-vs-download-archive MOTW comparison. |
+
+Every `.psm1` in `psm/` has a sibling `<Name>.Tests.ps1` in `test/`.
 
 ## Quick start — detection
 
@@ -175,7 +192,7 @@ need IIS, Python, or Node just for this.
 
 ```powershell
 Install-Module Pester -MinimumVersion 5.0 -Scope CurrentUser   # once
-Invoke-Pester .
+Invoke-Pester .\test
 ```
 
 Tests are designed to run on Linux/macOS too — any Describe that needs

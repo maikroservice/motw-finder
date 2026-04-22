@@ -25,7 +25,7 @@ param(
     [ValidateSet('CbcHmac','Gcm')][string]$CipherMode = 'CbcHmac'
 )
 
-Import-Module (Join-Path $PSScriptRoot 'SmugglingHarness.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'psm/SmugglingHarness.psm1') -Force
 
 if (-not (Test-Path -LiteralPath $OutputDir)) {
     New-Item -Path $OutputDir -ItemType Directory | Out-Null

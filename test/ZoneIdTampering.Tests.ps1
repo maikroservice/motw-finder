@@ -1,8 +1,8 @@
 #Requires -Modules @{ ModuleName='Pester'; ModuleVersion='5.0.0' }
 
 BeforeAll {
-    Import-Module (Join-Path $PSScriptRoot 'MotwFinder.psm1') -Force
-    Import-Module (Join-Path $PSScriptRoot 'ZoneIdTampering.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../psm/MotwFinder.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../psm/ZoneIdTampering.psm1') -Force
 }
 
 Describe 'Get-ZoneIdTamperingVariants' {

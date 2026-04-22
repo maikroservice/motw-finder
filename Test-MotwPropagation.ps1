@@ -1,142 +1,99 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Scan a drop folder against an expected-MOTW manifest.  Reports whether
-    every payload got MOTW (outer) and how propagation fared through each
-    container via every extractor available on the host (inner).
+    For every file under a path, report whether it carries Mark-of-the-Web.
+
+.DESCRIPTION
+    HOW MOTW DETECTION WORKS:
+
+      Windows attaches Mark-of-the-Web as an NTFS Alternate Data Stream
+      named "Zone.Identifier" on the file itself.  Concretely, for
+      C:\Downloads\foo.exe, MOTW lives at the pseudo-path
+      "C:\Downloads\foo.exe:Zone.Identifier" and contains INI-style
+      text, e.g.
+
+          [ZoneTransfer]
+          ZoneId=3
+          HostUrl=https://example.com/foo.exe
+          ReferrerUrl=https://example.com/
+
+      This script reads that stream via:
+
+          Get-Content -LiteralPath <file> -Stream 'Zone.Identifier' -Raw
+
+      Decision logic for each file:
+        * Stream read succeeds AND the content parses as a [ZoneTransfer]
+          section with a valid integer ZoneId  ->  HasMotw = True.
+          The parsed ZoneName / HostUrl / ReferrerUrl are shown.
+        * Stream does not exist (Get-Content raises
+          ItemNotFoundException)                ->  HasMotw = False.
+        * Stream exists but is empty / malformed ->  HasMotw = False.
+          (Use Find-SuspiciousMotw.ps1 if you want "stream present but
+          unparseable" called out as its own finding.)
 
 .EXAMPLE
-    .\Test-MotwPropagation.ps1 -DropDir "$env:USERPROFILE\Downloads" -ExpectedManifest .\expected.json
+    .\Test-MotwPropagation.ps1 -Path "$env:USERPROFILE\Downloads"
 
 .EXAMPLE
-    .\Test-MotwPropagation.ps1 -DropDir C:\drops -ExpectedManifest .\expected.json -Format Json |
-        Out-File results.json -Encoding utf8
+    .\Test-MotwPropagation.ps1 -Path ..\..\files-motw -Recurse -Format Csv
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory, Position = 0)][string]$DropDir,
-    [Parameter(Mandatory, Position = 1)][string]$ExpectedManifest,
-    [string[]]$Extractors,
-    [ValidateSet('Summary','Table','Grouped','Csv','Json')][string]$Format = 'Summary'
+    [Parameter(Mandatory, Position = 0)][string]$Path,
+    [switch]$Recurse,
+    [switch]$HideMethodBanner,
+    [ValidateSet('Table','Csv','Json')][string]$Format = 'Table'
 )
 
-Import-Module (Join-Path $PSScriptRoot 'PropagationScanner.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'MotwFinder.psm1') -Force
 
-$params = @{ DropDir = $DropDir; ExpectedManifest = $ExpectedManifest }
-if ($PSBoundParameters.ContainsKey('Extractors')) { $params.Extractors = $Extractors }
+$Path = (Resolve-Path -LiteralPath $Path).ProviderPath
+if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+    throw "Path is not a directory: $Path"
+}
 
-$results = Invoke-MotwPropagationScan @params
-
-function Write-Summary {
-    param($Rows)
-
-    $outer = @($Rows | Where-Object Section -eq 'outer')
-    $inner = @($Rows | Where-Object Section -eq 'inner')
-
-    $by = @{}
-    foreach ($s in 'PASS','FAIL','MISSING','ERROR','SKIP') { $by[$s] = 0 }
-    foreach ($r in $Rows) { if ($by.ContainsKey($r.Status)) { $by[$r.Status] += 1 } }
-
-    $color = 'Green'
-    if ($by['FAIL'] -gt 0 -or $by['ERROR'] -gt 0) { $color = 'Red' }
-    elseif ($by['MISSING'] -gt 0)                { $color = 'Yellow' }
-
+if (-not $HideMethodBanner -and $Format -eq 'Table') {
     Write-Host ''
-    Write-Host '=== MOTW propagation summary ===' -ForegroundColor Cyan
-    Write-Host '  PASS = no MOTW (bypass succeeded)     FAIL = MOTW present (bypass failed)' -ForegroundColor DarkGray
-    Write-Host ("Total rows: {0}  (outer: {1}, inner: {2})" -f $Rows.Count, $outer.Count, $inner.Count)
-    Write-Host ("  PASS    : {0}   (files with no MOTW)" -f $by['PASS'])    -ForegroundColor Green
-    Write-Host ("  FAIL    : {0}   (files marked with MOTW)" -f $by['FAIL']) -ForegroundColor Red
-    Write-Host ("  MISSING : {0}   (not on disk)" -f $by['MISSING'])         -ForegroundColor Yellow
-    Write-Host ("  ERROR   : {0}" -f $by['ERROR'])   -ForegroundColor Magenta
-    Write-Host ("  SKIP    : {0}" -f $by['SKIP'])    -ForegroundColor DarkGray
+    Write-Host 'How MOTW detection works:' -ForegroundColor Cyan
+    Write-Host '  MOTW lives in an NTFS Alternate Data Stream named "Zone.Identifier" on the'
+    Write-Host '  file itself (e.g. C:\path\foo.exe:Zone.Identifier). This script reads it with:'
+    Write-Host ''
+    Write-Host '    Get-Content -LiteralPath <file> -Stream "Zone.Identifier" -Raw'
+    Write-Host ''
+    Write-Host '  Stream present + parses as [ZoneTransfer] with integer ZoneId  ->  HasMotw = True'
+    Write-Host '  Stream missing (ItemNotFoundException) or unparseable           ->  HasMotw = False'
+    Write-Host ''
+}
 
-    if ($outer.Count -gt 0) {
-        $withMotw = @($outer | Where-Object ActualMotw)
-        Write-Host ''
-        Write-Host ("Outer drops carrying MOTW: {0}/{1}" -f $withMotw.Count, $outer.Count) -ForegroundColor $color
+$files = if ($Recurse) {
+    Get-ChildItem -LiteralPath $Path -File -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    Get-ChildItem -LiteralPath $Path -File -Force -ErrorAction SilentlyContinue
+}
 
-        $zoneCounts = $outer | Where-Object ActualMotw |
-                      Group-Object ZoneName -NoElement |
-                      Sort-Object Count -Descending
-        foreach ($z in $zoneCounts) {
-            Write-Host ("  Zone {0,-12} : {1}" -f $z.Name, $z.Count)
-        }
-
-        $hosts = @($outer | Where-Object { $_.HostUrl } |
-                           Select-Object -ExpandProperty HostUrl -Unique)
-        if ($hosts.Count -gt 0) {
-            Write-Host ''
-            Write-Host ("Distinct outer HostUrl values ({0}):" -f $hosts.Count)
-            foreach ($h in $hosts) { Write-Host "  $h" }
-        }
-    }
-
-    if ($inner.Count -gt 0) {
-        Write-Host ''
-        Write-Host '=== Inner (container) propagation by extractor ===' -ForegroundColor Cyan
-        Write-Host '  (PASS = extractor did NOT propagate MOTW; FAIL = it DID)' -ForegroundColor DarkGray
-        $inner | Group-Object Extractor | ForEach-Object {
-            $ext   = $_.Name
-            $pass  = @($_.Group | Where-Object Status -eq 'PASS').Count
-            $fail  = @($_.Group | Where-Object Status -eq 'FAIL').Count
-            $total = $_.Group.Count
-            Write-Host ("  {0,-18} {1}/{2} PASS (bypass), {3} FAIL (propagated)" -f $ext, $pass, $total, $fail)
-        }
-    }
-
-    $nonPass = @($Rows | Where-Object { $_.Status -ne 'PASS' })
-    if ($nonPass.Count -gt 0) {
-        Write-Host ''
-        Write-Host '=== Non-PASS rows ===' -ForegroundColor Yellow
-        $nonPass | Format-Table Status, Section, Extractor, FileName, ActualMotw, ZoneName, HostUrl, Reason -AutoSize -Wrap
-    }
-
-    # Heuristic hints
-    $riskyExts = @('.lnk','.hta','.js','.vbs','.wsf','.ps1','.bat','.cmd','.scr','.chm','.cpl','.msc','.settingcontent-ms','.url')
-    $missing   = @($Rows | Where-Object Status -eq 'MISSING')
-    $missingRisky = @($missing | Where-Object { [System.IO.Path]::GetExtension($_.FileName).ToLowerInvariant() -in $riskyExts })
-    if ($missingRisky.Count -ge 3 -and $missingRisky.Count -ge ($missing.Count / 2)) {
-        Write-Host ''
-        Write-Host 'Hint:' -ForegroundColor Yellow -NoNewline
-        Write-Host ' Most MISSING entries are risky-extension file types (.lnk, .ps1, .bat, etc.).'
-        Write-Host '      Chrome/Edge/Firefox block auto-download of these by default. Open the'
-        Write-Host '      browser''s downloads panel and click "Keep" on each blocked item, then'
-        Write-Host '      re-scan.'
-    }
-
-    $untrusted = @($Rows | Where-Object { $_.ZoneName -eq 'Untrusted' -and $_.HostUrl -like 'file:*' })
-    if ($untrusted.Count -gt 0) {
-        Write-Host ''
-        Write-Host 'Hint:' -ForegroundColor Yellow -NoNewline
-        Write-Host ' Drops are marked Untrusted (ZoneId=4) with HostUrl=file:///.'
-        Write-Host '      That means you opened smuggle.html via a file:// URL. For Internet-zone'
-        Write-Host '      (ZoneId=3) downloads, serve it over HTTP:'
-        Write-Host '        .\Start-SmugglingServer.ps1 -Root <dir-with-smuggle.html>'
-        Write-Host '      Then open  http://localhost:8080/smuggle.html  in the browser.'
+$results = foreach ($f in $files) {
+    $motw = Get-FileMotw -Path $f.FullName
+    [pscustomobject]@{
+        FileName    = $f.Name
+        HasMotw     = [bool]$motw
+        ZoneName    = if ($motw) { $motw.ZoneName }    else { $null }
+        HostUrl     = if ($motw) { $motw.HostUrl }     else { $null }
+        ReferrerUrl = if ($motw) { $motw.ReferrerUrl } else { $null }
+        Path        = $f.FullName
     }
 }
 
 switch ($Format) {
-    'Summary' { Write-Summary -Rows $results }
-    'Table'   {
-        $results | Format-Table Section, Status, Extractor, FileName, ZoneName, HostUrl, ExpectMotw, ActualMotw, Reason -AutoSize -Wrap
-    }
-    'Grouped' {
-        $statusColors = @{ PASS='Green'; FAIL='Red'; MISSING='Yellow'; SKIP='Cyan'; ERROR='Magenta' }
-        foreach ($status in 'FAIL','ERROR','MISSING','SKIP','PASS') {
-            $group = @($results | Where-Object Status -eq $status)
-            if ($group.Count -eq 0) { continue }
-            Write-Host ''
-            Write-Host ("=== {0} ({1}) ===" -f $status, $group.Count) -ForegroundColor $statusColors[$status]
-            $group | Format-Table Section, Extractor, FileName, ZoneName, HostUrl, ExpectMotw, ActualMotw, Reason -AutoSize -Wrap
-        }
+    'Table' {
+        $results |
+            Sort-Object @{ Expression = { -not $_.HasMotw } }, FileName |
+            Format-Table FileName, HasMotw, ZoneName, HostUrl -AutoSize
+
+        $total  = @($results).Count
+        $marked = @($results | Where-Object HasMotw).Count
+        Write-Host ''
+        Write-Host ("{0} file(s) total: {1} with MOTW, {2} without." -f $total, $marked, ($total - $marked)) -ForegroundColor Cyan
     }
     'Csv'  { $results | ConvertTo-Csv -NoTypeInformation }
     'Json' { $results | ConvertTo-Json -Depth 4 }
 }
-
-# No conditional exit code: PASS and FAIL are both legitimate observations
-# (PASS = bypass succeeded, FAIL = MOTW applied), so neither is "the error
-# state".  If you want a CI gate, pipe -Format Json and assert on specific
-# rows yourself.

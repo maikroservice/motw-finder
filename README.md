@@ -34,8 +34,8 @@ Every harness payload is a benign marker string with no executable behaviour.
 | `smuggling-template.html` | Browser-side WebCrypto decrypt + `<a download>` drop loop. Dual-mode: switches between CBC+HMAC and GCM at runtime based on the embedded mode marker. |
 | `New-SmugglingPayload.ps1` | CLI: emits `smuggle.html` + `expected.json` for later scanning. |
 | `Start-SmugglingServer.ps1` | Minimal local HTTP server (`System.Net.HttpListener`) for serving the smuggling page so browsers treat drops as Internet zone instead of Untrusted. |
-| `PropagationScanner.psm1` | Compares observed MOTW to expected manifest; recurses into containers via each available extractor. |
-| `Test-MotwPropagation.ps1` | CLI over the scanner. PASS = bypass succeeded (no MOTW), FAIL = bypass failed (MOTW present). |
+| `Test-MotwPropagation.ps1` | Walk a directory and print `HasMotw = True/False` per file. Includes a banner explaining how detection works. |
+| `PropagationScanner.psm1` | Library-only utilities used by `GitHarness.psm1`: `Get-AvailableExtractors`, `Expand-ContainerToTemp`, `Dismount-ContainerHandle`. Not called by the CLI any more. |
 | `Debug-MotwScan.ps1` | Per-file diagnostic: prints the raw `Zone.Identifier` bytes, parser output, and candidate renames. Use when the scanner result looks wrong. |
 | `ZoneIdTampering.psm1` | 13 malformed-stream variants (CVE-2022-44698 padding, ZoneId downgrade, BOMs, missing header, etc.). |
 | `New-TamperedFixtures.ps1` | CLI: produces a directory of files each carrying a different tampered stream. |
@@ -80,22 +80,37 @@ Every `.psm1` has a sibling `.Tests.ps1`.
 #    "Keep / Discard" in its downloads panel; click "Keep" on each.
 #    Every payload carries the marker string "MOTW-TEST-PAYLOAD-7b3d".
 
-# 4. Scan the drop folder against the expected manifest.
-.\Test-MotwPropagation.ps1 `
-    -DropDir "$env:USERPROFILE\Downloads" `
-    -ExpectedManifest C:\motw-test\expected.json
+# 4. Walk the drop folder and print HasMotw per file.
+.\Test-MotwPropagation.ps1 -Path "$env:USERPROFILE\Downloads"
 ```
 
-Output is a summary with PASS/FAIL counts and an inline legend:
+The output is a plain table, one row per file:
 
-- **PASS** = no Zone.Identifier on disk (MOTW bypass succeeded).
-- **FAIL** = Zone.Identifier present (MOTW applied; bypass failed).
-- **MISSING** = file not at the expected path (browser blocked it, or
-  collided on a name and got renamed to `marker (1).txt`).
+```
+FileName       HasMotw ZoneName  HostUrl
+--------       ------- --------  -------
+container.zip  True    Internet  http://localhost:8080/
+marker.docm    True    Internet  http://localhost:8080/
+marker.txt     True    Internet  http://localhost:8080/
+marker.pdf     True    Internet  http://localhost:8080/
+marker.lnk     False
+...
 
-The scanner recurses into every container that has `Expected.InnerFiles`
-in the manifest, using whichever extractors are on PATH —
-`Expand-Archive`, `7z`, and `Mount-DiskImage` for ISO/IMG.
+7 file(s) total: 5 with MOTW, 2 without.
+```
+
+How detection works (also printed as a banner on every run unless
+`-HideMethodBanner` is passed):
+
+> MOTW lives in an NTFS Alternate Data Stream named `Zone.Identifier` on
+> the file itself (e.g. `C:\path\foo.exe:Zone.Identifier`). The script
+> reads that stream with
+> `Get-Content -LiteralPath <file> -Stream 'Zone.Identifier' -Raw`. If
+> the read succeeds and the content parses as `[ZoneTransfer]` with an
+> integer `ZoneId`, `HasMotw = True` and the zone name + HostUrl +
+> ReferrerUrl are surfaced. If the stream is absent (the stream read
+> raises `ItemNotFoundException`) or the content is malformed,
+> `HasMotw = False`.
 
 ### Why the local HTTP server matters
 
@@ -170,25 +185,24 @@ real NTFS ADS or an external tool is guarded with `-Skip`.
 
 ### HTML-smuggling harness
 The browser writes every payload from a `Blob`. Modern Chrome/Edge/Firefox
-tag these with `Zone.Identifier`, so **outer** drops should land with
-MOTW (Status = `FAIL` in the bypass-perspective summary — the defense
-worked). The interesting results are in the **inner** section, where
-each extractor is a potential bypass:
+tag these with `Zone.Identifier` (so they appear with `HasMotw = True`
+in the scanner output). Interesting observations:
 
-- **ISO / IMG with inner `.lnk` via `Mount-DiskImage`** — on a fully-
-  patched Windows post-CVE-2022-41091, mounting propagates MOTW, so
-  inner rows should be `FAIL` (bypass failed). If you instead see `PASS`
-  (no MOTW on the inner file), your machine is behind on the Nov 2022
-  patch and is vulnerable to the Qakbot/BazarLoader ISO pattern.
-- **ZIP via `Expand-Archive`** — never propagates. Inner rows will
-  always be `PASS` (bypass succeeded); this is the baseline bypass shape
-  that any PowerShell-based extraction gives attackers for free.
-- **ZIP via `7z`** — depends on version. 7-Zip 22.00+ (June 2022)
-  propagates (`FAIL`, bypass failed); older 7-Zip versions don't
-  (`PASS`, bypass succeeded). Useful for confirming whether the user
-  fleet has been updated.
-- **Password-protected ZIP** — historically strips MOTW across most
-  extractors regardless of version. Expect `PASS` on the inner file.
+- **Outer drops served via `http://localhost`** should report
+  `ZoneName = Internet` and the server URL as `HostUrl`. If you serve
+  via `file://` they show `ZoneName = Untrusted` and `HostUrl = file:///`
+  instead — realistic phish testing wants Internet zone, which is why
+  `Start-SmugglingServer.ps1` exists.
+- **Containers (`.zip`, `.iso`, `.img`)** get MOTW on the container
+  itself. Whether the *inner* file keeps MOTW after extraction depends
+  on the extractor: Explorer's Shell32 COM and Mount-DiskImage propagate
+  (post-CVE-2022-41091 patch for ISO/IMG); 7-Zip 22.00+ propagates for
+  ZIP; older 7-Zip, WinRAR ≤ 6.22, and all `Expand-Archive` /
+  `System.IO.Compression.ZipFile` paths drop the mark. Test by
+  extracting into a subfolder and re-running the scanner against that
+  subfolder.
+- **Password-protected ZIP** — historically strips MOTW from inner files
+  across every extractor. Expect `HasMotw = False` on the contents.
 
 ### Zone.Identifier tampering
 Each variant probes either the parser or SmartScreen itself. Variants

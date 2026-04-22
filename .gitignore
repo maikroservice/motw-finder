@@ -1,0 +1,52 @@
+# ---------- generated harness output ----------
+# New-SmugglingPayload writes these; New-TamperedFixtures / Test-GitMotwPropagation
+# produce similar trees. Never commit generated HTML bundles — each one has a
+# fresh AES key inline and is large.
+smuggle.html
+expected.json
+tampered.manifest.json
+
+# common output-dir names used in the usage examples
+/motw-test/
+/motw-tamper/
+/git-test/
+/drop/
+/fixtures-out/
+
+# temp extraction / mount / clone workdirs (also emitted under $TEMP, but
+# if a user passes a -WorkDir inside the repo tree, these patterns keep
+# checkouts clean)
+extract_*/
+motwprop_*/
+pwzip_*/
+iso_*/
+gitfix_*/
+gitclone_*/
+gite2e*/
+innerwork_*/
+
+# ---------- Pester / test output ----------
+TestResults.xml
+coverage.xml
+*.trx
+
+# ---------- Zone.Identifier sidecar files on non-Windows ----------
+# On Linux/macOS the tampering generator (and some test fixtures) writes
+# literal "<file>:Zone.Identifier" sidecars.  They're test artefacts, not
+# source.  On Windows these filenames can't exist — the real ADS lives
+# invisibly on the parent file — so this pattern is a no-op there.
+*:Zone.Identifier
+
+# ---------- OS / editor ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- PowerShell / .NET ----------
+*.ps1xml.bak
+PSScriptAnalyzer.log

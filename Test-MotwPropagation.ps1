@@ -90,6 +90,30 @@ function Write-Summary {
         Write-Host '=== Rows needing attention ===' -ForegroundColor Yellow
         $failing | Format-Table Status, Section, Extractor, FileName, ExpectMotw, ActualMotw, ZoneName, Reason -AutoSize -Wrap
     }
+
+    # Heuristic hints
+    $riskyExts = @('.lnk','.hta','.js','.vbs','.wsf','.ps1','.bat','.cmd','.scr','.chm','.cpl','.msc','.settingcontent-ms','.url')
+    $missing   = @($Rows | Where-Object Status -eq 'MISSING')
+    $missingRisky = @($missing | Where-Object { [System.IO.Path]::GetExtension($_.FileName).ToLowerInvariant() -in $riskyExts })
+    if ($missingRisky.Count -ge 3 -and $missingRisky.Count -ge ($missing.Count / 2)) {
+        Write-Host ''
+        Write-Host 'Hint:' -ForegroundColor Yellow -NoNewline
+        Write-Host ' Most MISSING entries are risky-extension file types (.lnk, .ps1, .bat, etc.).'
+        Write-Host '      Chrome/Edge/Firefox block auto-download of these by default. Open the'
+        Write-Host '      browser''s downloads panel and click "Keep" on each blocked item, then'
+        Write-Host '      re-scan.'
+    }
+
+    $untrusted = @($Rows | Where-Object { $_.ZoneName -eq 'Untrusted' -and $_.HostUrl -like 'file:*' })
+    if ($untrusted.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'Hint:' -ForegroundColor Yellow -NoNewline
+        Write-Host ' Drops are marked Untrusted (ZoneId=4) with HostUrl=file:///.'
+        Write-Host '      That means you opened smuggle.html via a file:// URL. For Internet-zone'
+        Write-Host '      (ZoneId=3) downloads, serve it over HTTP:'
+        Write-Host '        .\Start-SmugglingServer.ps1 -Root <dir-with-smuggle.html>'
+        Write-Host '      Then open  http://localhost:8080/smuggle.html  in the browser.'
+    }
 }
 
 switch ($Format) {

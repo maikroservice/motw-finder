@@ -216,8 +216,8 @@ function Invoke-MotwPropagationScan {
         $path = Join-Path $DropDir $exp.FileName
         if (-not (Test-Path -LiteralPath $path)) { continue }
 
-        $use = if ($Extractors -and $Extractors.Count -gt 0) { $Extractors } else { Get-AvailableExtractors $path }
-        if (-not $use -or $use.Count -eq 0) {
+        $use = @(if ($Extractors -and @($Extractors).Count -gt 0) { $Extractors } else { Get-AvailableExtractors $path })
+        if ($use.Count -eq 0) {
             [pscustomobject][ordered]@{
                 FileName    = $exp.FileName
                 Section     = 'inner'

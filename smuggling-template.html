@@ -5,17 +5,27 @@
 <title>MOTW Propagation Test Harness</title>
 <style>
   :root { color-scheme: light dark; }
-  body { font: 14px/1.5 system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; }
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 820px; margin: 2em auto; padding: 0 1em; }
   h1 { font-size: 1.2em; margin-bottom: 0.2em; }
   p.sub { color: #666; margin-top: 0; }
   .warn { background: #fff3cd; color: #664d03; border: 1px solid #ffda6a; padding: 0.8em; margin: 1em 0; border-radius: 4px; }
-  button { padding: 0.6em 1.2em; font-size: 1em; cursor: pointer; border-radius: 4px; border: 1px solid #888; background: #f4f4f4; }
-  button:disabled { cursor: wait; opacity: .6; }
-  #log { margin-top: 1em; font-family: ui-monospace, monospace; font-size: 13px; }
-  .drop { padding: .2em 0; border-bottom: 1px solid #eee; }
-  .drop.ok { color: #080; }
-  .drop.err { color: #b00; }
-  .drop.pending { color: #999; }
+  .tip  { background: #cff4fc; color: #055160; border: 1px solid #9eeaf9; padding: 0.8em; margin: 1em 0; border-radius: 4px; }
+  .topbar { display: flex; gap: 1em; align-items: center; margin: 1em 0; }
+  .topbar button { padding: 0.5em 1em; font-size: 1em; cursor: pointer; border-radius: 4px; border: 1px solid #888; background: #f4f4f4; }
+  #counter { font-family: ui-monospace, monospace; color: #333; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 28px minmax(280px, 1fr) auto auto; gap: 0.25em 0.75em; align-items: center; font-family: ui-monospace, monospace; font-size: 13px; }
+  .grid .idx   { text-align: right; color: #999; }
+  .grid .name  { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grid .mime  { color: #666; font-size: 12px; }
+  .grid button { padding: 0.3em 0.7em; cursor: pointer; border-radius: 3px; border: 1px solid #888; background: #f4f4f4; font-size: 12px; }
+  .grid button:disabled { opacity: 0.6; cursor: default; }
+  .row.ok      .name { color: #080; }
+  .row.ok      button { background: #d4edda; border-color: #a3cfbb; }
+  .row.err     .name { color: #b00; }
+  .row.err     button { background: #f8d7da; border-color: #f1aeb5; }
+  .row.pending .name { color: #999; }
+  details { margin-top: 1em; }
+  details summary { cursor: pointer; }
 </style>
 </head>
 <body>
@@ -27,15 +37,31 @@ benign marker payloads so defenders can observe whether Mark-of-the-Web is appli
 (and propagates through containers) on their system. No dropped file is executable;
 every payload contains a known marker string.</div>
 
-<button id="go">Drop {{COUNT}} test payloads</button>
-<div id="log"></div>
+<div class="tip"><b>Browser blocks.</b> Chrome / Edge / Firefox block auto-download of
+risky file types (.lnk, .ps1, .bat, .vbs, .hta, .js, ...). Each payload here gets
+its own button so every drop is a user gesture -- that bypasses the multi-download
+throttle. For blocked items, check the browser's downloads panel and click "Keep".</div>
+
+<div class="topbar">
+  <button id="reset" type="button">Reset</button>
+  <span id="counter">0 / 0 dropped</span>
+  <span id="mode" style="color:#888;"></span>
+</div>
+
+<div id="payloads" class="grid" aria-live="polite"></div>
+
+<details>
+  <summary>Debug log</summary>
+  <pre id="log" style="white-space: pre-wrap;"></pre>
+</details>
 
 <script>
 const MODE        = /*__CIPHER_MODE__*/;
 const K_AES_B64   = /*__AES_KEY_B64__*/;
 const K_MAC_B64   = /*__MAC_KEY_B64__*/;
 const BLOBS       = /*__PAYLOAD_JSON__*/;
-const DROP_DELAY_MS = 250;
+
+const log = (m) => { const el = document.getElementById('log'); el.textContent += m + '\n'; };
 
 function b64ToBytes(b64) {
   const bin = atob(b64);
@@ -51,7 +77,9 @@ function concatBytes(a, b) {
   return out;
 }
 
-async function importKeys() {
+let cachedKeys = null;
+async function getKeys() {
+  if (cachedKeys) return cachedKeys;
   const aesRaw = b64ToBytes(K_AES_B64);
   const out = {};
   if (MODE === 'cbc-hmac') {
@@ -61,6 +89,7 @@ async function importKeys() {
   } else {  // 'gcm'
     out.aes = await crypto.subtle.importKey('raw', aesRaw, { name: 'AES-GCM' },             false, ['decrypt']);
   }
+  cachedKeys = out;
   return out;
 }
 
@@ -91,28 +120,63 @@ async function dropOne(keys, spec) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-document.getElementById('go').addEventListener('click', async (ev) => {
-  ev.target.disabled = true;
-  const log = document.getElementById('log');
-  const keys = await importKeys();
-  for (let i = 0; i < BLOBS.length; i++) {
-    const spec = BLOBS[i];
-    const row = document.createElement('div');
-    row.className = 'drop pending';
-    row.textContent = `[${i + 1}/${BLOBS.length}] ${spec.n} (${spec.m}) ...`;
-    log.appendChild(row);
-    try {
-      await dropOne(keys, spec);
-      row.classList.replace('pending', 'ok');
-      row.textContent = `[${i + 1}/${BLOBS.length}] ${spec.n} dropped`;
-    } catch (e) {
-      row.classList.replace('pending', 'err');
-      row.textContent = `[${i + 1}/${BLOBS.length}] ${spec.n} FAILED: ${e}`;
-    }
-    await new Promise(r => setTimeout(r, DROP_DELAY_MS));
-  }
-  ev.target.textContent = `Done (mode=${MODE}) — check your Downloads folder.`;
+function updateCounter() {
+  const done = document.querySelectorAll('.row.ok').length;
+  document.getElementById('counter').textContent = `${done} / ${BLOBS.length} dropped`;
+}
+
+function render() {
+  const root = document.getElementById('payloads');
+  root.innerHTML = '';
+  document.getElementById('mode').textContent = `cipher = ${MODE}`;
+
+  BLOBS.forEach((spec, i) => {
+    const idx  = document.createElement('div'); idx.className = 'idx row-cell'; idx.textContent = (i + 1) + '.';
+    const name = document.createElement('div'); name.className = 'name row-cell'; name.textContent = spec.n;
+    const mime = document.createElement('div'); mime.className = 'mime row-cell'; mime.textContent = spec.m;
+    const btn  = document.createElement('button'); btn.type = 'button'; btn.textContent = 'Drop';
+
+    const cells = [idx, name, mime, btn];
+    const rowClass = ['row', 'pending'];
+    cells.forEach(c => c.classList.add(...rowClass));
+    cells.forEach(c => root.appendChild(c));
+
+    const markRow = (cls) => {
+      cells.forEach(c => {
+        c.classList.remove('pending', 'ok', 'err');
+        c.classList.add(cls);
+      });
+    };
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const keys = await getKeys();
+        await dropOne(keys, spec);
+        markRow('ok');
+        btn.textContent = 'dropped';
+        log(`[${i+1}/${BLOBS.length}] ${spec.n} dropped`);
+      } catch (e) {
+        markRow('err');
+        btn.textContent = 'retry';
+        btn.disabled = false;
+        log(`[${i+1}/${BLOBS.length}] ${spec.n} FAILED: ${e}`);
+      }
+      updateCounter();
+    });
+  });
+
+  updateCounter();
+}
+
+document.getElementById('reset').addEventListener('click', () => {
+  cachedKeys = null;
+  document.getElementById('log').textContent = '';
+  render();
 });
+
+render();
 </script>
 </body>
 </html>

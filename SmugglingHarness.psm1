@@ -208,8 +208,12 @@ function Get-DefaultPayloadManifest {
     $items += @{ Builder = { New-OoxmlContainerBytes -Kind docm }; Mime = 'application/vnd.ms-word.document.macroEnabled.12';                         ExpectMotw = $true; Expected = @{} }
     $items += @{ Builder = { New-OoxmlContainerBytes -Kind xlsm }; Mime = 'application/vnd.ms-excel.sheet.macroEnabled.12';                           ExpectMotw = $true; Expected = @{} }
 
-    # F. Script / loader types (marker files with dangerous extensions)
-    foreach ($ext in '.lnk','.hta','.js','.vbs','.wsf','.ps1','.bat','.cmd','.scr','.chm','.cpl','.msc','.settingcontent-ms','.url') {
+    # F. Script / loader types (marker files with dangerous extensions).
+    # Browsers block auto-download of several of these; the user must
+    # click "Keep" in the browser's download panel for each one.
+    # '.hta' is omitted because it is already covered by the
+    # New-MarkerHtaBytes baseline above.
+    foreach ($ext in '.lnk','.js','.vbs','.wsf','.ps1','.bat','.cmd','.scr','.chm','.cpl','.msc','.settingcontent-ms','.url') {
         $e = $ext
         $items += @{
             Builder = [scriptblock]::Create("New-MarkerFileBytes -Extension '$e'")
@@ -344,7 +348,10 @@ function New-SmugglingHtmlBundle {
     $aesKeyLit  = '"' + [Convert]::ToBase64String($aesKey) + '"'
     $macKeyLit  = if ($null -ne $macKey) { '"' + [Convert]::ToBase64String($macKey) + '"' } else { 'null' }
 
-    $html = Get-Content -LiteralPath $TemplatePath -Raw
+    # Read the template explicitly as UTF-8 -- Windows PowerShell 5.1's
+    # Get-Content default is ANSI for BOM-less files, which would corrupt
+    # any non-ASCII characters in the template.
+    $html = [System.IO.File]::ReadAllText($TemplatePath, [System.Text.Encoding]::UTF8)
     $html = $html.Replace('{{COUNT}}',              [string]$Items.Count)
     $html = $html.Replace('/*__CIPHER_MODE__*/',    $modeMarker)
     $html = $html.Replace('/*__AES_KEY_B64__*/',    $aesKeyLit)

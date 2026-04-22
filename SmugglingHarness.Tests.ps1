@@ -114,12 +114,11 @@ Describe 'New-SmugglingHtmlBundle (default CbcHmac)' {
 
     It 'fills every template placeholder' {
         $bundle = New-SmugglingHtmlBundle -Items $script:items
-        $bundle.Html | Should -Not -Match '\{\{COUNT\}\}'
         $bundle.Html | Should -Not -Match '/\*__PAYLOAD_JSON__\*/'
         $bundle.Html | Should -Not -Match '/\*__AES_KEY_B64__\*/'
         $bundle.Html | Should -Not -Match '/\*__MAC_KEY_B64__\*/'
         $bundle.Html | Should -Not -Match '/\*__CIPHER_MODE__\*/'
-        $bundle.Html | Should -Match '>Drop 2 test payloads<'
+        $bundle.Html | Should -Match 'id="payloads"'
         $bundle.Html | Should -Match "MODE\s*=\s*'cbc-hmac'"
     }
 

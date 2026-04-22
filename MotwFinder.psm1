@@ -72,9 +72,19 @@ function ConvertFrom-ZoneIdentifier {
 function Read-MotwStream {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
+    # Resolve to a filesystem-absolute path first. Relative paths can mis-
+    # resolve when Get-Content runs inside a module session state, which
+    # silently returns null and masquerades as "no MOTW".
     try {
-        Get-Content -LiteralPath $Path -Stream 'Zone.Identifier' -Raw -ErrorAction Stop
+        $full = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).ProviderPath
     } catch {
+        Write-Verbose "Read-MotwStream: cannot resolve path '$Path': $_"
+        return $null
+    }
+    try {
+        Get-Content -LiteralPath $full -Stream 'Zone.Identifier' -Raw -ErrorAction Stop
+    } catch {
+        Write-Verbose "Read-MotwStream: no Zone.Identifier on '$full' ($($_.Exception.GetType().Name): $($_.Exception.Message))"
         return $null
     }
 }

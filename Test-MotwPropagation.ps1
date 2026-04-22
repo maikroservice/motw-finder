@@ -43,10 +43,11 @@ function Write-Summary {
 
     Write-Host ''
     Write-Host '=== MOTW propagation summary ===' -ForegroundColor Cyan
+    Write-Host '  PASS = no MOTW (bypass succeeded)     FAIL = MOTW present (bypass failed)' -ForegroundColor DarkGray
     Write-Host ("Total rows: {0}  (outer: {1}, inner: {2})" -f $Rows.Count, $outer.Count, $inner.Count)
-    Write-Host ("  PASS    : {0}" -f $by['PASS'])    -ForegroundColor Green
-    Write-Host ("  FAIL    : {0}" -f $by['FAIL'])    -ForegroundColor Red
-    Write-Host ("  MISSING : {0}" -f $by['MISSING']) -ForegroundColor Yellow
+    Write-Host ("  PASS    : {0}   (files with no MOTW)" -f $by['PASS'])    -ForegroundColor Green
+    Write-Host ("  FAIL    : {0}   (files marked with MOTW)" -f $by['FAIL']) -ForegroundColor Red
+    Write-Host ("  MISSING : {0}   (not on disk)" -f $by['MISSING'])         -ForegroundColor Yellow
     Write-Host ("  ERROR   : {0}" -f $by['ERROR'])   -ForegroundColor Magenta
     Write-Host ("  SKIP    : {0}" -f $by['SKIP'])    -ForegroundColor DarkGray
 
@@ -74,21 +75,21 @@ function Write-Summary {
     if ($inner.Count -gt 0) {
         Write-Host ''
         Write-Host '=== Inner (container) propagation by extractor ===' -ForegroundColor Cyan
+        Write-Host '  (PASS = extractor did NOT propagate MOTW; FAIL = it DID)' -ForegroundColor DarkGray
         $inner | Group-Object Extractor | ForEach-Object {
             $ext   = $_.Name
             $pass  = @($_.Group | Where-Object Status -eq 'PASS').Count
             $fail  = @($_.Group | Where-Object Status -eq 'FAIL').Count
             $total = $_.Group.Count
-            $c = if ($fail -gt 0) { 'Red' } else { 'Green' }
-            Write-Host ("  {0,-18} {1}/{2} PASS, {3} FAIL" -f $ext, $pass, $total, $fail) -ForegroundColor $c
+            Write-Host ("  {0,-18} {1}/{2} PASS (bypass), {3} FAIL (propagated)" -f $ext, $pass, $total, $fail)
         }
     }
 
-    $failing = @($Rows | Where-Object { $_.Status -in 'FAIL','MISSING','ERROR' })
-    if ($failing.Count -gt 0) {
+    $nonPass = @($Rows | Where-Object { $_.Status -ne 'PASS' })
+    if ($nonPass.Count -gt 0) {
         Write-Host ''
-        Write-Host '=== Rows needing attention ===' -ForegroundColor Yellow
-        $failing | Format-Table Status, Section, Extractor, FileName, ExpectMotw, ActualMotw, ZoneName, Reason -AutoSize -Wrap
+        Write-Host '=== Non-PASS rows ===' -ForegroundColor Yellow
+        $nonPass | Format-Table Status, Section, Extractor, FileName, ActualMotw, ZoneName, HostUrl, Reason -AutoSize -Wrap
     }
 
     # Heuristic hints
@@ -135,5 +136,7 @@ switch ($Format) {
     'Json' { $results | ConvertTo-Json -Depth 4 }
 }
 
-$failed = @($results | Where-Object Status -eq 'FAIL')
-if ($failed.Count -gt 0) { exit 1 }
+# No conditional exit code: PASS and FAIL are both legitimate observations
+# (PASS = bypass succeeded, FAIL = MOTW applied), so neither is "the error
+# state".  If you want a CI gate, pipe -Format Json and assert on specific
+# rows yourself.

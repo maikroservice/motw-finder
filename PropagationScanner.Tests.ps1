@@ -4,6 +4,11 @@ BeforeAll {
     Import-Module (Join-Path $PSScriptRoot 'PropagationScanner.psm1') -Force
 }
 
+# Status semantics:
+#   PASS = no MOTW observed (bypass succeeded)
+#   FAIL = MOTW observed (bypass failed / defense worked)
+#   MISSING = file not at expected path
+
 Describe 'Test-OuterMotwPropagation' {
     BeforeEach {
         $script:drop = Join-Path ([System.IO.Path]::GetTempPath()) ("drop_" + [guid]::NewGuid().ToString('N'))
@@ -15,7 +20,7 @@ Describe 'Test-OuterMotwPropagation' {
         }
     }
 
-    It 'reports PASS when expected MOTW matches observed' {
+    It 'reports FAIL when the file has MOTW' {
         $fn = 'marker.txt'
         Set-Content -LiteralPath (Join-Path $script:drop $fn) -Value 'x'
         Mock -ModuleName PropagationScanner Get-FileMotw {
@@ -23,19 +28,21 @@ Describe 'Test-OuterMotwPropagation' {
         }
         $expected = @([pscustomobject]@{ FileName = $fn; ExpectMotw = $true })
         $rows = @(Test-OuterMotwPropagation -DropDir $script:drop -Expected $expected)
-        $rows.Count        | Should -Be 1
-        $rows[0].Status    | Should -Be 'PASS'
+        $rows.Count         | Should -Be 1
+        $rows[0].Status     | Should -Be 'FAIL'
         $rows[0].ActualMotw | Should -BeTrue
-        $rows[0].HostUrl   | Should -Be 'https://example/'
+        $rows[0].HostUrl    | Should -Be 'https://example/'
+        $rows[0].ZoneName   | Should -Be 'Internet'
     }
 
-    It 'reports FAIL when expected MOTW is missing' {
+    It 'reports PASS when the file has no MOTW (bypass)' {
         $fn = 'marker.lnk'
         Set-Content -LiteralPath (Join-Path $script:drop $fn) -Value 'x'
         Mock -ModuleName PropagationScanner Get-FileMotw { $null }
         $expected = @([pscustomobject]@{ FileName = $fn; ExpectMotw = $true })
         $rows = @(Test-OuterMotwPropagation -DropDir $script:drop -Expected $expected)
-        $rows[0].Status | Should -Be 'FAIL'
+        $rows[0].Status     | Should -Be 'PASS'
+        $rows[0].ActualMotw | Should -BeFalse
     }
 
     It 'reports MISSING when the file was never dropped' {
@@ -51,7 +58,6 @@ Describe 'Test-InnerMotwPropagation' {
         $script:work = Join-Path ([System.IO.Path]::GetTempPath()) ("innerwork_" + [guid]::NewGuid().ToString('N'))
         New-Item -Path $script:work -ItemType Directory | Out-Null
 
-        # Build a fake extracted directory we can hand to the mocked extractor
         $script:extract = Join-Path $script:work 'extract'
         New-Item -Path $script:extract -ItemType Directory | Out-Null
         Set-Content -LiteralPath (Join-Path $script:extract 'inner.lnk') -Value 'x'
@@ -70,25 +76,18 @@ Describe 'Test-InnerMotwPropagation' {
         }
     }
 
-    It 'PASSes when MOTW propagates and was expected' {
+    It 'reports FAIL when the extractor propagates MOTW to the inner file' {
         Mock -ModuleName PropagationScanner Get-FileMotw {
             [pscustomobject]@{ ZoneId = 3; ZoneName = 'Internet'; HostUrl = $null; ReferrerUrl = $null }
         }
         $inner = @(@{ Path = 'inner.lnk'; ExpectMotw = $true; Reason = 'should propagate' })
         $rows  = @(Test-InnerMotwPropagation -ContainerPath $script:container -InnerSpec $inner -Extractors @('Expand-Archive'))
-        $rows.Count       | Should -Be 1
-        $rows[0].Status   | Should -Be 'PASS'
+        $rows.Count        | Should -Be 1
+        $rows[0].Status    | Should -Be 'FAIL'
         $rows[0].Extractor | Should -Be 'Expand-Archive'
     }
 
-    It 'FAILs when MOTW was expected but propagation did not occur' {
-        Mock -ModuleName PropagationScanner Get-FileMotw { $null }
-        $inner = @(@{ Path = 'inner.lnk'; ExpectMotw = $true; Reason = 'should propagate' })
-        $rows  = @(Test-InnerMotwPropagation -ContainerPath $script:container -InnerSpec $inner -Extractors @('Expand-Archive'))
-        $rows[0].Status | Should -Be 'FAIL'
-    }
-
-    It 'PASSes when non-propagation is the expected bypass shape' {
+    It 'reports PASS when the extractor does not propagate (bypass shape)' {
         Mock -ModuleName PropagationScanner Get-FileMotw { $null }
         $inner = @(@{ Path = 'inner.lnk'; ExpectMotw = $false; Reason = 'Expand-Archive never propagates' })
         $rows  = @(Test-InnerMotwPropagation -ContainerPath $script:container -InnerSpec $inner -Extractors @('Expand-Archive'))
@@ -135,10 +134,10 @@ Describe 'Invoke-MotwPropagationScan end-to-end' {
         }
     }
 
-    It 'produces one outer row per item plus one inner row per (container, extractor, inner)' {
+    It 'marks outer files that do carry MOTW as FAIL and inner bypass as PASS' {
         Mock -ModuleName PropagationScanner Get-FileMotw {
             param($Path)
-            if ((Split-Path $Path -Leaf) -eq 'inner.lnk') { return $null }  # bypass
+            if ((Split-Path $Path -Leaf) -eq 'inner.lnk') { return $null }  # extractor did not propagate
             [pscustomobject]@{ ZoneId = 3; ZoneName = 'Internet'; HostUrl = $null; ReferrerUrl = $null }
         }
         $rows = @(Invoke-MotwPropagationScan -DropDir $script:drop -ExpectedManifest $script:mf -Extractors @('Expand-Archive'))
@@ -146,7 +145,9 @@ Describe 'Invoke-MotwPropagationScan end-to-end' {
         $inner = @($rows | Where-Object Section -eq 'inner')
         $outer.Count | Should -Be 2
         $inner.Count | Should -Be 1
-        ($outer | Where-Object Status -ne 'PASS') | Should -BeNullOrEmpty
-        $inner[0].Status | Should -Be 'PASS'   # bypass is the expected shape here
+        # Both outer files have MOTW -> FAIL (bypass failed / defense worked)
+        ($outer | Where-Object Status -ne 'FAIL') | Should -BeNullOrEmpty
+        # Inner file has no MOTW -> PASS (extractor bypass succeeded)
+        $inner[0].Status | Should -Be 'PASS'
     }
 }

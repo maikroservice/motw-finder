@@ -9,7 +9,17 @@ an expected.json manifest produced by New-SmugglingPayload.ps1, then:
     extracts/mounts with every extractor available on the host and reads
     MOTW on the inner files.
 
-Reports one row per (file, section, extractor) with PASS / FAIL / MISSING.
+Reports one row per (file, section, extractor) with status:
+
+  PASS    - No Zone.Identifier stream found (MOTW bypass succeeded).
+  FAIL    - Zone.Identifier present (MOTW applied; bypass failed).
+  MISSING - File not found at the expected path.
+  ERROR   - Extractor or I/O failure.
+  SKIP    - No extractor available on this host for a given container.
+
+Note: the PASS/FAIL framing is from the attacker/bypass perspective --
+PASS means "no MOTW, bypass worked".  ExpectMotw is still tracked per row
+for reference but no longer drives Status.
 #>
 
 Import-Module (Join-Path $PSScriptRoot 'MotwFinder.psm1') -Force
@@ -44,7 +54,8 @@ function Test-OuterMotwPropagation {
             $row.ZoneName    = if ($motw) { $motw.ZoneName }    else { $null }
             $row.HostUrl     = if ($motw) { $motw.HostUrl }     else { $null }
             $row.ReferrerUrl = if ($motw) { $motw.ReferrerUrl } else { $null }
-            $row.Status      = if ($row.ActualMotw -eq $row.ExpectMotw) { 'PASS' } else { 'FAIL' }
+            # PASS = no MOTW (bypass succeeded); FAIL = MOTW present (bypass failed).
+            $row.Status      = if ($row.ActualMotw) { 'FAIL' } else { 'PASS' }
         }
         [pscustomobject]$row
     }
@@ -178,7 +189,9 @@ function Test-InnerMotwPropagation {
                     $row.ZoneName    = if ($motw) { $motw.ZoneName }    else { $null }
                     $row.HostUrl     = if ($motw) { $motw.HostUrl }     else { $null }
                     $row.ReferrerUrl = if ($motw) { $motw.ReferrerUrl } else { $null }
-                    $row.Status      = if ($row.ActualMotw -eq $row.ExpectMotw) { 'PASS' } else { 'FAIL' }
+                    # PASS = no MOTW (propagation bypass succeeded);
+                    # FAIL = MOTW present (extractor propagated the mark).
+                    $row.Status      = if ($row.ActualMotw) { 'FAIL' } else { 'PASS' }
                 }
                 [pscustomobject]$row
             }
@@ -201,6 +214,11 @@ function Invoke-MotwPropagationScan {
     if (-not (Test-Path -LiteralPath $DropDir)) {
         throw "Drop directory not found: $DropDir"
     }
+
+    # Anchor both paths to filesystem-absolute up front so every downstream
+    # Get-Content / Test-Path is deterministic regardless of module CWD.
+    $DropDir          = (Resolve-Path -LiteralPath $DropDir).ProviderPath
+    $ExpectedManifest = (Resolve-Path -LiteralPath $ExpectedManifest).ProviderPath
 
     $expected = Get-Content -LiteralPath $ExpectedManifest -Raw | ConvertFrom-Json
     if ($expected -isnot [array]) { $expected = @($expected) }
